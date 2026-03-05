@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MATH UTILITIES
@@ -76,11 +76,15 @@ function DecisionNote({pVal,alpha}) {
   const reject=pVal<alpha;
   return <Note>💡 P-value ({pVal.toFixed(4)}) {reject?"<":"≥"} α ({alpha}) → {reject?"Reject H₀. Sufficient evidence supports the alternative hypothesis.":"Fail to Reject H₀. Insufficient evidence to reject the null hypothesis."}</Note>;
 }
-function TailSel({value,onChange,param="μ",param0="μ₀"}) {
-  return <Sel label="Alternative Hypothesis (H₁)" value={value} onChange={onChange} options={[["two",`${param} ≠ ${param0} (two-tailed)`],["right",`${param} > ${param0} (right-tailed)`],["left",`${param} < ${param0} (left-tailed)`]]}/>;
+function TailSel({value,onChange,param="μ",param0="μ₀",testMode=false}) {
+  const opts = testMode
+    ? [["two","Two-tailed"],["right","Right-tailed"],["left","Left-tailed"]]
+    : [["two",`${param} ≠ ${param0} (two-tailed)`],["right",`${param} > ${param0} (right-tailed)`],["left",`${param} < ${param0} (left-tailed)`]];
+  const lbl = testMode ? "Tail Type" : "Alternative Hypothesis (H₁)";
+  return <Sel label={lbl} value={value} onChange={onChange} options={opts}/>;
 }
-function ZTResults({res,label}) {
-  return <div style={{marginTop:14}}><ResultBanner reject={res.reject} alpha={res.alpha}/><StatRow label={`${label.toUpperCase()} Test Statistic`} value={res.stat.toFixed(4)} highlight/>{res.df!=null&&<StatRow label="Degrees of Freedom (df)" value={typeof res.df==="number"?res.df.toFixed(2):res.df}/>}<StatRow label={`Critical Value (${label}*${res.tail==="two"?" ±":""})`} value={res.critical.toFixed(4)}/><StatRow label="P-value" value={res.pVal.toFixed(4)}/><DecisionNote pVal={res.pVal} alpha={res.alpha}/></div>;
+function ZTResults({res,label,testMode=false}) {
+  return <div style={{marginTop:14}}>{!testMode&&<ResultBanner reject={res.reject} alpha={res.alpha}/>}<StatRow label={`${label.toUpperCase()} Test Statistic`} value={res.stat.toFixed(4)} highlight/>{res.df!=null&&<StatRow label="Degrees of Freedom (df)" value={typeof res.df==="number"?res.df.toFixed(2):res.df}/>}<StatRow label={`Critical Value (${label}*${res.tail==="two"?" ±":""})`} value={res.critical.toFixed(4)}/><StatRow label="P-value" value={res.pVal.toFixed(4)}/>{!testMode&&<DecisionNote pVal={res.pVal} alpha={res.alpha}/>}</div>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -91,6 +95,83 @@ const pad={l:50,r:20,t:18,b:38};
 const chartW=SVG_W-pad.l-pad.r, chartH=SVG_H-pad.t-pad.b;
 const mkScaleX=(mn,mx)=>x=>pad.l+(x-mn)/(mx-mn||1)*chartW;
 const mkScaleY=(mn,mx)=>y=>SVG_H-pad.b-(y-mn)/(mx-mn||1)*chartH;
+// ═══════════════════════════════════════════════════════════════════════════════
+// CHART DOWNLOAD UTILITY
+// ═══════════════════════════════════════════════════════════════════════════════
+function downloadSVG(svgEl, filename) {
+  if (!svgEl) return;
+  const svgData = new XMLSerializer().serializeToString(svgEl);
+  const canvas = document.createElement("canvas");
+  const scale = 3; // 3x resolution for crisp export
+  canvas.width  = (svgEl.viewBox.baseVal.width  || svgEl.clientWidth  || 500) * scale;
+  canvas.height = (svgEl.viewBox.baseVal.height || svgEl.clientHeight || 220) * scale;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const img = new Image();
+  const blob = new Blob([svgData], {type:"image/svg+xml;charset=utf-8"});
+  const url  = URL.createObjectURL(blob);
+  img.onload = () => {
+    ctx.scale(scale, scale);
+    ctx.drawImage(img, 0, 0);
+    URL.revokeObjectURL(url);
+    const a = document.createElement("a");
+    a.download = filename + ".png";
+    a.href = canvas.toDataURL("image/png");
+    a.click();
+  };
+  img.src = url;
+}
+
+function ChartToolbar({svgRef, filename, children}) {
+  const [copied, setCopied] = useState(false);
+  const handleDownload = () => downloadSVG(svgRef.current, filename);
+  const handleCopy = async () => {
+    const svgEl = svgRef.current;
+    if (!svgEl) return;
+    const svgData = new XMLSerializer().serializeToString(svgEl);
+    const canvas = document.createElement("canvas");
+    const scale = 3;
+    canvas.width  = (svgEl.viewBox.baseVal.width  || svgEl.clientWidth  || 500) * scale;
+    canvas.height = (svgEl.viewBox.baseVal.height || svgEl.clientHeight || 220) * scale;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const img = new Image();
+    const blob = new Blob([svgData], {type:"image/svg+xml;charset=utf-8"});
+    const url  = URL.createObjectURL(blob);
+    img.onload = async () => {
+      ctx.scale(scale, scale);
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      canvas.toBlob(async (pngBlob) => {
+        try {
+          await navigator.clipboard.write([new ClipboardItem({"image/png": pngBlob})]);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        } catch(e) {
+          // Fallback: just download instead
+          handleDownload();
+        }
+      });
+    };
+    img.src = url;
+  };
+  return (
+    <div>
+      {children}
+      <div style={{display:"flex",gap:8,marginTop:8,justifyContent:"flex-end"}}>
+        <button onClick={handleCopy} style={{background:copied?"#059669":"#f1f5f9",color:copied?"#fff":"#475569",border:"1px solid #e2e8f0",borderRadius:6,padding:"5px 12px",fontSize:11,cursor:"pointer",fontWeight:600,transition:"all .2s"}}>
+          {copied ? "✅ Copied!" : "📋 Copy Image"}
+        </button>
+        <button onClick={handleDownload} style={{background:"#2563eb",color:"#fff",border:"none",borderRadius:6,padding:"5px 12px",fontSize:11,cursor:"pointer",fontWeight:600}}>
+          ⬇ Save as PNG
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Axis({xMin,xMax,yMin=0,yMax,ticks=5,yLabel="",xLabel=""}) {
   const sx=mkScaleX(xMin,xMax), sy=mkScaleY(yMin,yMax);
   const xTks=Array.from({length:ticks+1},(_,i)=>xMin+(xMax-xMin)*i/ticks);
@@ -108,15 +189,67 @@ function Axis({xMin,xMax,yMin=0,yMax,ticks=5,yLabel="",xLabel=""}) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // APP ROOT
 // ═══════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+// LANDING SCREEN
+// ═══════════════════════════════════════════════════════════════════════════════
+function LandingScreen({onSelect}) {
+  return (
+    <div style={{fontFamily:"Georgia,serif",background:"linear-gradient(160deg,#0f172a 0%,#1e3a8a 60%,#2563eb 100%)",minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"40px 24px",color:"#fff"}}>
+      <div style={{fontSize:48,marginBottom:12}}>📐</div>
+      <div style={{fontSize:28,fontWeight:800,letterSpacing:.5,marginBottom:6,textAlign:"center"}}>Elementary Statistics Calculator</div>
+      <div style={{fontSize:14,opacity:.7,marginBottom:48,textAlign:"center"}}>Choose a mode to get started</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24,maxWidth:720,width:"100%"}}>
+
+        {/* Practice Mode */}
+        <div onClick={()=>onSelect("practice")} style={{background:"rgba(255,255,255,0.08)",border:"2px solid rgba(255,255,255,0.2)",borderRadius:16,padding:"32px 28px",cursor:"pointer",transition:"all .2s",backdropFilter:"blur(8px)"}}
+          onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,0.16)";e.currentTarget.style.borderColor="rgba(255,255,255,0.5)";}}
+          onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.08)";e.currentTarget.style.borderColor="rgba(255,255,255,0.2)";}}>
+          <div style={{fontSize:36,marginBottom:12}}>🎓</div>
+          <div style={{fontSize:20,fontWeight:700,marginBottom:8}}>Practice Calculator</div>
+          <div style={{fontSize:13,opacity:.8,lineHeight:1.6,marginBottom:16}}>Full-featured calculator with hints, interpretations, decision rules, and explanatory notes. Perfect for learning and homework.</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+            {["Outlier fences","Empirical rule","Decision notes","r² interpretation","Chart descriptions"].map(f=>(
+              <span key={f} style={{background:"rgba(16,185,129,0.25)",border:"1px solid rgba(16,185,129,0.4)",borderRadius:4,padding:"2px 8px",fontSize:11,color:"#a7f3d0"}}>{f}</span>
+            ))}
+          </div>
+        </div>
+
+        {/* Testing Mode */}
+        <div onClick={()=>onSelect("test")} style={{background:"rgba(220,38,38,0.12)",border:"2px solid rgba(220,38,38,0.3)",borderRadius:16,padding:"32px 28px",cursor:"pointer",transition:"all .2s",backdropFilter:"blur(8px)"}}
+          onMouseEnter={e=>{e.currentTarget.style.background="rgba(220,38,38,0.22)";e.currentTarget.style.borderColor="rgba(220,38,38,0.6)";}}
+          onMouseLeave={e=>{e.currentTarget.style.background="rgba(220,38,38,0.12)";e.currentTarget.style.borderColor="rgba(220,38,38,0.3)";}}>
+          <div style={{fontSize:36,marginBottom:12}}>📝</div>
+          <div style={{fontSize:20,fontWeight:700,marginBottom:8}}>Testing Calculator</div>
+          <div style={{fontSize:13,opacity:.8,lineHeight:1.6,marginBottom:16}}>Calculations only — no hints, no interpretations, no decision rules. Students must supply their own conclusions.</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+            {["No outlier fences","No empirical rule","No decision notes","No r² interpretation","No chart descriptions"].map(f=>(
+              <span key={f} style={{background:"rgba(220,38,38,0.2)",border:"1px solid rgba(220,38,38,0.4)",borderRadius:4,padding:"2px 8px",fontSize:11,color:"#fca5a5"}}>{f}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div style={{marginTop:40,fontSize:12,opacity:.45,textAlign:"center"}}>
+        You can switch modes at any time using the button in the top bar.
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// APP ROOT
+// ═══════════════════════════════════════════════════════════════════════════════
 export default function StatsApp() {
+  const [screen,setScreen]=useState("landing"); // "landing" | "practice" | "test"
   const [tab,setTab]=useState(0);
   const [csvData,setCsvData]=useState(null);
-  // Shared data strings that CSV upload can push into tabs
+  const [csvData2,setCsvData2]=useState(null);
   const [sharedRaw,setSharedRaw]=useState("");
   const [sharedRaw2,setSharedRaw2]=useState("");
   const [sharedXRaw,setSharedXRaw]=useState("");
   const [sharedYRaw,setSharedYRaw]=useState("");
 
+  const handleDataLoaded2 = (parsed) => { setCsvData2(parsed); };
   const handleDataLoaded = (parsed, target, col, col2) => {
     setCsvData(parsed);
     if (!target || !col) return;
@@ -125,38 +258,48 @@ export default function StatsApp() {
     const str = vals.join(", ");
     const str2 = vals2.join(", ");
     if (target === "descriptive" || target === "visualizations" || target === "hypothesis_t2") {
-      setSharedRaw(str);
-      setSharedRaw2(str2);
+      setSharedRaw(str); setSharedRaw2(str2);
     }
-    if (target === "regression") {
-      setSharedXRaw(str);
-      setSharedYRaw(str2);
-    }
-    // Switch to target tab
+    if (target === "regression") { setSharedXRaw(str); setSharedYRaw(str2); }
     const tabMap = {descriptive:0, hypothesis_t2:1, regression:4, visualizations:5};
     if (tabMap[target] !== undefined) setTab(tabMap[target]);
   };
 
+  if (screen==="landing") return <LandingScreen onSelect={s=>setScreen(s)}/>;
+
+  const testMode = screen==="test";
+  const headerBg = testMode
+    ? "linear-gradient(135deg,#7f1d1d 0%,#dc2626 100%)"
+    : "linear-gradient(135deg,#1e3a8a 0%,#2563eb 100%)";
+
   return (
-    <div style={{fontFamily:"Georgia,serif",background:"#f0f4ff",minHeight:"100vh",color:"#1e293b"}}>
-      <div style={{background:"linear-gradient(135deg,#1e3a8a 0%,#2563eb 100%)",color:"#fff",padding:"18px 24px 0"}}>
-        <div style={{fontSize:21,fontWeight:700,letterSpacing:.3}}>📐 Elementary Statistics Calculator</div>
+    <div style={{fontFamily:"Georgia,serif",background:testMode?"#fff5f5":"#f0f4ff",minHeight:"100vh",color:"#1e293b"}}>
+      <div style={{background:headerBg,color:"#fff",padding:"18px 24px 0"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+          <div style={{fontSize:21,fontWeight:700,letterSpacing:.3}}>
+            {testMode?"📝 Statistics Testing Calculator":"📐 Elementary Statistics Calculator"}
+          </div>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            {testMode&&<span style={{background:"rgba(255,255,255,0.2)",borderRadius:5,padding:"3px 10px",fontSize:11,fontWeight:700,letterSpacing:.5}}>TESTING MODE</span>}
+            <button onClick={()=>setScreen("landing")} style={{background:"rgba(255,255,255,0.15)",color:"#fff",border:"1px solid rgba(255,255,255,0.3)",borderRadius:6,padding:"4px 12px",fontSize:11,cursor:"pointer"}}>⇄ Switch Mode</button>
+          </div>
+        </div>
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
-          <div style={{fontSize:11,opacity:.7}}>Free interactive tool for statistics students</div>
-          {csvData && <div style={{fontSize:11,background:"rgba(255,255,255,0.2)",borderRadius:5,padding:"2px 8px"}}>📂 {csvData.rowCount} rows loaded</div>}
+          <div style={{fontSize:11,opacity:.7}}>{testMode?"Calculations only — no hints or interpretations":"Full-featured calculator with hints and interpretations"}</div>
+          {csvData&&<div style={{fontSize:11,background:"rgba(255,255,255,0.2)",borderRadius:5,padding:"2px 8px"}}>📂 A: {csvData.rowCount} rows{csvData2?` | B: ${csvData2.rowCount} rows`:""}</div>}
         </div>
         <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-          {TABS.map((t,i)=><button key={i} onClick={()=>setTab(i)} style={{background:tab===i?"#fff":"rgba(255,255,255,0.15)",color:tab===i?"#1e3a8a":"#fff",border:"none",borderRadius:"6px 6px 0 0",padding:"8px 13px",cursor:"pointer",fontSize:11,fontWeight:tab===i?700:400,transition:"all .15s"}}>{t}{i===6&&csvData?<span style={{marginLeft:4,background:"#10b981",borderRadius:3,padding:"0 4px",fontSize:9}}>✓</span>:""}</button>)}
+          {TABS.map((t,i)=><button key={i} onClick={()=>setTab(i)} style={{background:tab===i?"#fff":"rgba(255,255,255,0.15)",color:tab===i?testMode?"#7f1d1d":"#1e3a8a":"#fff",border:"none",borderRadius:"6px 6px 0 0",padding:"8px 13px",cursor:"pointer",fontSize:11,fontWeight:tab===i?700:400,transition:"all .15s"}}>{t}{i===6&&(csvData||csvData2)?<span style={{marginLeft:4,background:"#10b981",borderRadius:3,padding:"0 4px",fontSize:9}}>{csvData&&csvData2?"2":"1"}✓</span>:""}</button>)}
         </div>
       </div>
       <div style={{padding:"22px 24px",maxWidth:860,margin:"0 auto"}}>
-        {tab===0&&<DescriptiveTab initData={sharedRaw}/>}
-        {tab===1&&<HypothesisTab initRaw1={sharedRaw} initRaw2={sharedRaw2}/>}
-        {tab===2&&<ConfidenceTab/>}
-        {tab===3&&<DistributionsTab/>}
-        {tab===4&&<RegressionTab initXRaw={sharedXRaw} initYRaw={sharedYRaw}/>}
-        {tab===5&&<VisualizationsTab initData={sharedRaw} initData2={sharedRaw2}/>}
-        {tab===6&&<CSVUploadTab onDataLoaded={handleDataLoaded} csvData={csvData}/>}
+        {tab===0&&<DescriptiveTab initData={sharedRaw} testMode={testMode}/>}
+        {tab===1&&<HypothesisTab initRaw1={sharedRaw} initRaw2={sharedRaw2} testMode={testMode}/>}
+        {tab===2&&<ConfidenceTab testMode={testMode}/>}
+        {tab===3&&<DistributionsTab testMode={testMode}/>}
+        {tab===4&&<RegressionTab initXRaw={sharedXRaw} initYRaw={sharedYRaw} testMode={testMode}/>}
+        {tab===5&&<VisualizationsTab initData={sharedRaw} initData2={sharedRaw2} testMode={testMode}/>}
+        {tab===6&&<CSVUploadTab onDataLoaded={handleDataLoaded} csvData={csvData} csvData2={csvData2} onDataLoaded2={handleDataLoaded2}/>}
       </div>
     </div>
   );
@@ -165,7 +308,7 @@ export default function StatsApp() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // TAB 1: DESCRIPTIVE STATISTICS
 // ═══════════════════════════════════════════════════════════════════════════════
-function DescriptiveTab({initData=""}) {
+function DescriptiveTab({initData="",testMode=false}) {
   const [raw,setRaw]=useState(initData||"78, 85, 92, 61, 74, 88, 95, 71, 83, 79");
   const [res,setRes]=useState(null);
   // Sync when CSV data arrives
@@ -185,8 +328,8 @@ function DescriptiveTab({initData=""}) {
       <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:7,textAlign:"center",marginBottom:10}}>
         {[["Min",res.min],["Q1",res.q1],["Median",res.q2],["Q3",res.q3],["Max",res.max]].map(([l,v])=><div key={l} style={{background:"#eff6ff",borderRadius:7,padding:"9px 3px"}}><div style={{fontSize:9,color:"#64748b",marginBottom:2}}>{l}</div><div style={{fontWeight:700,color:"#1e3a8a",fontSize:13}}>{v.toFixed(2)}</div></div>)}
       </div>
-      <StatRow label="IQR (Q3 − Q1)" value={res.iqr.toFixed(4)} highlight/>
-      <Note>💡 Outlier fences — Lower: {(res.q1-1.5*res.iqr).toFixed(2)} | Upper: {(res.q3+1.5*res.iqr).toFixed(2)}</Note>
+      {!testMode&&<StatRow label="IQR (Q3 − Q1)" value={res.iqr.toFixed(4)} highlight/>}
+      {!testMode&&<Note>💡 Outlier fences — Lower: {(res.q1-1.5*res.iqr).toFixed(2)} | Upper: {(res.q3+1.5*res.iqr).toFixed(2)}</Note>}
     </Card></>}
   </div>;
 }
@@ -195,7 +338,7 @@ function DescriptiveTab({initData=""}) {
 // TAB 2: HYPOTHESIS TESTING
 // ═══════════════════════════════════════════════════════════════════════════════
 const HYP_TESTS=[["z1","1-Sample Z"],["z2","2-Sample Z"],["t1","1-Sample T"],["t2","2-Sample T"],["chi","Chi-Square"]];
-function HypothesisTab({initRaw1="",initRaw2=""}) {
+function HypothesisTab({initRaw1="",initRaw2="",testMode=false}) {
   const [test,setTest]=useState("z1");
   return <div>
     <Card title="Select Test Type" accent="#dc2626">
@@ -204,31 +347,31 @@ function HypothesisTab({initRaw1="",initRaw2=""}) {
       </div>
       {(initRaw1||initRaw2)&&<Note color="#eff6ff" border="#bfdbfe" text="#1e40af" style={{marginTop:10}}>📂 CSV data loaded — switch to <strong>Two-Sample T-Test</strong> to use it in Group 1 / Group 2 raw data fields.</Note>}
     </Card>
-    {test==="z1"&&<OneSampleZTest/>}{test==="z2"&&<TwoSampleZTest/>}{test==="t1"&&<OneSampleTTest/>}{test==="t2"&&<TwoSampleTTest initRaw1={initRaw1} initRaw2={initRaw2}/>}{test==="chi"&&<ChiSquareTest/>}
+    {test==="z1"&&<OneSampleZTest testMode={testMode}/>}{test==="z2"&&<TwoSampleZTest testMode={testMode}/>}{test==="t1"&&<OneSampleTTest testMode={testMode}/>}{test==="t2"&&<TwoSampleTTest initRaw1={initRaw1} initRaw2={initRaw2} testMode={testMode}/>}{test==="chi"&&<ChiSquareTest testMode={testMode}/>}
   </div>;
 }
-function OneSampleZTest() {
+function OneSampleZTest({testMode=false}) {
   const [xbar,setXbar]=useState("52"),[mu0,setMu0]=useState("50"),[sigma,setSigma]=useState("8"),[n,setN]=useState("36"),[tail,setTail]=useState("two"),[alpha,setAlpha]=useState("0.05"),[res,setRes]=useState(null),[err,setErr]=useState("");
   const calc=()=>{const m=+xbar,m0=+mu0,s=+sigma,nv=+n,a=+alpha;if(s<=0||nv<1){setErr("σ>0 and n≥1 required.");return;}setErr("");const stat=(m-m0)/(s/Math.sqrt(nv)),critical=normalInv(tail==="two"?1-a/2:1-a),pVal=pValueTail(stat,tail),reject=tail==="two"?Math.abs(stat)>critical:tail==="right"?stat>critical:stat<-critical;setRes({stat,pVal,critical,reject,alpha:a,tail,df:null});};
-  return <Card title="One-Sample Z-Test" accent="#dc2626"><p style={{fontSize:12,color:"#64748b",margin:"0 0 10px"}}>H₀: μ = μ₀ | Use when population σ is known</p><div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:9}}><NumInput label="Sample Mean (x̄)" value={xbar} onChange={setXbar} step={.1}/><NumInput label="Claimed Mean (μ₀)" value={mu0} onChange={setMu0} step={.1}/><NumInput label="Pop. Std Dev (σ)" value={sigma} onChange={setSigma} step={.1}/><NumInput label="Sample Size (n)" value={n} onChange={setN} min={1}/></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><TailSel value={tail} onChange={setTail}/><Sel label="Significance (α)" value={alpha} onChange={setAlpha} options={[["0.10","0.10"],["0.05","0.05"],["0.02","0.02"],["0.01","0.01"]]}/></div><Btn onClick={calc}>Run Test</Btn><ErrMsg msg={err}/>{res&&<ZTResults res={res} label="z"/>}</Card>;
+  return <Card title="One-Sample Z-Test" accent="#dc2626">{!testMode&&<p style={{fontSize:12,color:"#64748b",margin:"0 0 10px"}}>H₀: μ = μ₀ | Use when population σ is known</p>}<div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:9}}><NumInput label="Sample Mean (x̄)" value={xbar} onChange={setXbar} step={.1}/><NumInput label="Claimed Mean (μ₀)" value={mu0} onChange={setMu0} step={.1}/><NumInput label="Pop. Std Dev (σ)" value={sigma} onChange={setSigma} step={.1}/><NumInput label="Sample Size (n)" value={n} onChange={setN} min={1}/></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><TailSel value={tail} onChange={setTail} testMode={testMode}/><Sel label="Significance (α)" value={alpha} onChange={setAlpha} options={[["0.10","0.10"],["0.05","0.05"],["0.02","0.02"],["0.01","0.01"]]}/></div><Btn onClick={calc}>Run Test</Btn><ErrMsg msg={err}/>{res&&<ZTResults res={res} label="z" testMode={testMode}/>}</Card>;
 }
-function TwoSampleZTest() {
+function TwoSampleZTest({testMode=false}) {
   const [x1,setX1]=useState("85"),[x2,setX2]=useState("80"),[s1,setS1]=useState("10"),[s2,setS2]=useState("12"),[n1,setN1]=useState("40"),[n2,setN2]=useState("45"),[tail,setTail]=useState("two"),[alpha,setAlpha]=useState("0.05"),[res,setRes]=useState(null),[err,setErr]=useState("");
   const calc=()=>{const m1=+x1,m2=+x2,sv1=+s1,sv2=+s2,nv1=+n1,nv2=+n2,a=+alpha;if(sv1<=0||sv2<=0||nv1<1||nv2<1){setErr("σ>0 and n≥1 required.");return;}setErr("");const se=Math.sqrt(sv1**2/nv1+sv2**2/nv2),stat=(m1-m2)/se,critical=normalInv(tail==="two"?1-a/2:1-a),pVal=pValueTail(stat,tail),reject=tail==="two"?Math.abs(stat)>critical:tail==="right"?stat>critical:stat<-critical;setRes({stat,pVal,critical,reject,alpha:a,tail,df:null,se,diff:m1-m2});};
-  return <Card title="Two-Sample Z-Test" accent="#dc2626"><p style={{fontSize:12,color:"#64748b",margin:"0 0 10px"}}>H₀: μ₁ = μ₂ | Both population σ's known</p><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9}}><NumInput label="x̄₁" value={x1} onChange={setX1} step={.1}/><NumInput label="σ₁" value={s1} onChange={setS1} step={.1}/><NumInput label="n₁" value={n1} onChange={setN1} min={1}/><NumInput label="x̄₂" value={x2} onChange={setX2} step={.1}/><NumInput label="σ₂" value={s2} onChange={setS2} step={.1}/><NumInput label="n₂" value={n2} onChange={setN2} min={1}/></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><TailSel value={tail} onChange={setTail} param="μ₁−μ₂" param0="0"/><Sel label="Significance (α)" value={alpha} onChange={setAlpha} options={[["0.10","0.10"],["0.05","0.05"],["0.02","0.02"],["0.01","0.01"]]}/></div><Btn onClick={calc}>Run Test</Btn><ErrMsg msg={err}/>{res&&<div style={{marginTop:12}}><ResultBanner reject={res.reject} alpha={res.alpha}/><StatRow label="Difference (x̄₁−x̄₂)" value={res.diff.toFixed(4)}/><StatRow label="Standard Error" value={res.se.toFixed(4)}/><StatRow label="Z Statistic" value={res.stat.toFixed(4)} highlight/><StatRow label={`Critical Value (z*${res.tail==="two"?" ±":""})`} value={res.critical.toFixed(4)}/><StatRow label="P-value" value={res.pVal.toFixed(4)}/><DecisionNote pVal={res.pVal} alpha={res.alpha}/></div>}</Card>;
+  return <Card title="Two-Sample Z-Test" accent="#dc2626">{!testMode&&<p style={{fontSize:12,color:"#64748b",margin:"0 0 10px"}}>H₀: μ₁ = μ₂ | Both population σ's known</p>}<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9}}><NumInput label="x̄₁" value={x1} onChange={setX1} step={.1}/><NumInput label="σ₁" value={s1} onChange={setS1} step={.1}/><NumInput label="n₁" value={n1} onChange={setN1} min={1}/><NumInput label="x̄₂" value={x2} onChange={setX2} step={.1}/><NumInput label="σ₂" value={s2} onChange={setS2} step={.1}/><NumInput label="n₂" value={n2} onChange={setN2} min={1}/></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><TailSel value={tail} onChange={setTail} param="μ₁−μ₂" param0="0" testMode={testMode}/><Sel label="Significance (α)" value={alpha} onChange={setAlpha} options={[["0.10","0.10"],["0.05","0.05"],["0.02","0.02"],["0.01","0.01"]]}/></div><Btn onClick={calc}>Run Test</Btn><ErrMsg msg={err}/>{res&&<div style={{marginTop:12}}>{!testMode&&{!testMode&&<ResultBanner reject={res.reject} alpha={res.alpha}/>}}<StatRow label="Difference (x̄₁−x̄₂)" value={res.diff.toFixed(4)}/><StatRow label="Standard Error" value={res.se.toFixed(4)}/><StatRow label="Z Statistic" value={res.stat.toFixed(4)} highlight/><StatRow label={`Critical Value (z*${res.tail==="two"?" ±":""})`} value={res.critical.toFixed(4)}/><StatRow label="P-value" value={res.pVal.toFixed(4)}/>{!testMode&&{!testMode&&<DecisionNote pVal={res.pVal} alpha={res.alpha}/>}}</div>}</Card>;
 }
-function OneSampleTTest() {
+function OneSampleTTest({testMode=false}) {
   const [xbar,setXbar]=useState("52"),[mu0,setMu0]=useState("50"),[s,setS]=useState("8"),[n,setN]=useState("16"),[tail,setTail]=useState("two"),[alpha,setAlpha]=useState("0.05"),[res,setRes]=useState(null),[err,setErr]=useState("");
   const calc=()=>{const m=+xbar,m0=+mu0,sv=+s,nv=+n,a=+alpha;if(sv<=0||nv<2){setErr("s>0 and n≥2 required.");return;}setErr("");const df=nv-1,stat=(m-m0)/(sv/Math.sqrt(nv)),critical=tCritical(df,tail==="two"?a:a*2),pVal=pValueTail(stat,tail),reject=tail==="two"?Math.abs(stat)>critical:tail==="right"?stat>critical:stat<-critical;setRes({stat,pVal,critical,reject,alpha:a,tail,df});};
-  return <Card title="One-Sample T-Test" accent="#7c3aed"><p style={{fontSize:12,color:"#64748b",margin:"0 0 10px"}}>H₀: μ = μ₀ | σ unknown; best for small samples</p><div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:9}}><NumInput label="Sample Mean (x̄)" value={xbar} onChange={setXbar} step={.1}/><NumInput label="Claimed Mean (μ₀)" value={mu0} onChange={setMu0} step={.1}/><NumInput label="Std Dev (s)" value={s} onChange={setS} step={.1}/><NumInput label="Sample Size (n)" value={n} onChange={setN} min={2}/></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><TailSel value={tail} onChange={setTail}/><Sel label="Significance (α)" value={alpha} onChange={setAlpha} options={[["0.10","0.10"],["0.05","0.05"],["0.02","0.02"],["0.01","0.01"]]}/></div><Btn onClick={calc}>Run Test</Btn><ErrMsg msg={err}/>{res&&<ZTResults res={res} label="t"/>}</Card>;
+  return <Card title="One-Sample T-Test" accent="#7c3aed">{!testMode&&<p style={{fontSize:12,color:"#64748b",margin:"0 0 10px"}}>H₀: μ = μ₀ | σ unknown; best for small samples</p>}<div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:9}}><NumInput label="Sample Mean (x̄)" value={xbar} onChange={setXbar} step={.1}/><NumInput label="Claimed Mean (μ₀)" value={mu0} onChange={setMu0} step={.1}/><NumInput label="Std Dev (s)" value={s} onChange={setS} step={.1}/><NumInput label="Sample Size (n)" value={n} onChange={setN} min={2}/></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><TailSel value={tail} onChange={setTail} testMode={testMode}/><Sel label="Significance (α)" value={alpha} onChange={setAlpha} options={[["0.10","0.10"],["0.05","0.05"],["0.02","0.02"],["0.01","0.01"]]}/></div><Btn onClick={calc}>Run Test</Btn><ErrMsg msg={err}/>{res&&<ZTResults res={res} label="t" testMode={testMode}/>}</Card>;
 }
-function TwoSampleTTest({initRaw1="",initRaw2=""}) {
+function TwoSampleTTest({initRaw1="",initRaw2="",testMode=false}) {
   const [mode2,setMode2]=useState(initRaw1?"raw":"summary"),[x1,setX1]=useState("85"),[x2,setX2]=useState("80"),[s1,setS1]=useState("10"),[s2,setS2]=useState("12"),[n1,setN1]=useState("15"),[n2,setN2]=useState("18"),[raw1,setRaw1]=useState(initRaw1||"88,92,79,85,91,76,83,90,87,84,78,95,81,86,89"),[raw2,setRaw2]=useState(initRaw2||"75,82,78,70,85,80,74,88,77,83,71,86,79,73,81,84,76,80"),[tail,setTail]=useState("two"),[alpha,setAlpha]=useState("0.05"),[res,setRes]=useState(null),[err,setErr]=useState("");
   useMemo(()=>{if(initRaw1){setRaw1(initRaw1);setMode2("raw");}if(initRaw2)setRaw2(initRaw2);},[initRaw1,initRaw2]);
   const calc=()=>{let m1,m2,sv1,sv2,nv1,nv2;if(mode2==="raw"){const d1=parseData(raw1),d2=parseData(raw2);if(d1.length<2||d2.length<2){setErr("Each group needs ≥ 2 values.");return;}m1=mean(d1);m2=mean(d2);sv1=stdDev(d1);sv2=stdDev(d2);nv1=d1.length;nv2=d2.length;}else{m1=+x1;m2=+x2;sv1=+s1;sv2=+s2;nv1=+n1;nv2=+n2;if(sv1<=0||sv2<=0||nv1<2||nv2<2){setErr("s>0 and n≥2 required.");return;}}setErr("");const df=welchDF(sv1,nv1,sv2,nv2),se=Math.sqrt(sv1**2/nv1+sv2**2/nv2),stat=(m1-m2)/se,a=+alpha,critical=tCritical(Math.floor(df),tail==="two"?a:a*2),pVal=pValueTail(stat,tail),reject=tail==="two"?Math.abs(stat)>critical:tail==="right"?stat>critical:stat<-critical;setRes({stat,pVal,critical,reject,alpha:a,tail,df,se,diff:m1-m2,m1,m2,sv1,sv2,nv1,nv2,fromRaw:mode2==="raw"});};
-  return <Card title="Two-Sample T-Test (Welch's)" accent="#7c3aed"><p style={{fontSize:12,color:"#64748b",margin:"0 0 10px"}}>H₀: μ₁ = μ₂ | Independent groups, σ unknown</p><div style={{marginBottom:10}}><label style={{fontSize:12,fontWeight:600,color:"#475569",marginRight:8}}>Input:</label>{[["summary","Summary Stats"],["raw","Raw Data"]].map(([v,l])=><label key={v} style={{marginRight:14,cursor:"pointer",fontSize:12}}><input type="radio" name="t2mode" value={v} checked={mode2===v} onChange={()=>setMode2(v)} style={{marginRight:4}}/>{l}</label>)}</div>{mode2==="summary"?<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9}}><NumInput label="x̄₁" value={x1} onChange={setX1} step={.1}/><NumInput label="s₁" value={s1} onChange={setS1} step={.1}/><NumInput label="n₁" value={n1} onChange={setN1} min={2}/><NumInput label="x̄₂" value={x2} onChange={setX2} step={.1}/><NumInput label="s₂" value={s2} onChange={setS2} step={.1}/><NumInput label="n₂" value={n2} onChange={setN2} min={2}/></div>:<><DataInput label="Group 1 data:" value={raw1} onChange={setRaw1}/><DataInput label="Group 2 data:" value={raw2} onChange={setRaw2}/></>}<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><TailSel value={tail} onChange={setTail} param="μ₁−μ₂" param0="0"/><Sel label="Significance (α)" value={alpha} onChange={setAlpha} options={[["0.10","0.10"],["0.05","0.05"],["0.02","0.02"],["0.01","0.01"]]}/></div><Btn onClick={calc}>Run Test</Btn><ErrMsg msg={err}/>{res&&<div style={{marginTop:12}}><ResultBanner reject={res.reject} alpha={res.alpha}/>{res.fromRaw&&<><StatRow label="Group 1 x̄₁" value={`${res.m1.toFixed(3)} (s=${res.sv1.toFixed(3)}, n=${res.nv1})`}/><StatRow label="Group 2 x̄₂" value={`${res.m2.toFixed(3)} (s=${res.sv2.toFixed(3)}, n=${res.nv2})`}/></>}<StatRow label="Difference (x̄₁−x̄₂)" value={res.diff.toFixed(4)}/><StatRow label="Standard Error" value={res.se.toFixed(4)}/><StatRow label="df (Welch–Satterthwaite)" value={res.df.toFixed(2)}/><StatRow label="T Statistic" value={res.stat.toFixed(4)} highlight/><StatRow label={`Critical Value (t*${res.tail==="two"?" ±":""})`} value={res.critical.toFixed(4)}/><StatRow label="P-value (approx.)" value={res.pVal.toFixed(4)}/><DecisionNote pVal={res.pVal} alpha={res.alpha}/></div>}</Card>;
+  return <Card title="Two-Sample T-Test (Welch's)" accent="#7c3aed">{!testMode&&<p style={{fontSize:12,color:"#64748b",margin:"0 0 10px"}}>H₀: μ₁ = μ₂ | Independent groups, σ unknown</p>}<div style={{marginBottom:10}}><label style={{fontSize:12,fontWeight:600,color:"#475569",marginRight:8}}>Input:</label>{[["summary","Summary Stats"],["raw","Raw Data"]].map(([v,l])=><label key={v} style={{marginRight:14,cursor:"pointer",fontSize:12}}><input type="radio" name="t2mode" value={v} checked={mode2===v} onChange={()=>setMode2(v)} style={{marginRight:4}}/>{l}</label>)}</div>{mode2==="summary"?<div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9}}><NumInput label="x̄₁" value={x1} onChange={setX1} step={.1}/><NumInput label="s₁" value={s1} onChange={setS1} step={.1}/><NumInput label="n₁" value={n1} onChange={setN1} min={2}/><NumInput label="x̄₂" value={x2} onChange={setX2} step={.1}/><NumInput label="s₂" value={s2} onChange={setS2} step={.1}/><NumInput label="n₂" value={n2} onChange={setN2} min={2}/></div>:<><DataInput label="Group 1 data:" value={raw1} onChange={setRaw1}/><DataInput label="Group 2 data:" value={raw2} onChange={setRaw2}/></>}<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}><TailSel value={tail} onChange={setTail} param="μ₁−μ₂" param0="0" testMode={testMode}/><Sel label="Significance (α)" value={alpha} onChange={setAlpha} options={[["0.10","0.10"],["0.05","0.05"],["0.02","0.02"],["0.01","0.01"]]}/></div><Btn onClick={calc}>Run Test</Btn><ErrMsg msg={err}/>{res&&<div style={{marginTop:12}}>{!testMode&&{!testMode&&<ResultBanner reject={res.reject} alpha={res.alpha}/>}}{res.fromRaw&&<><StatRow label="Group 1 x̄₁" value={`${res.m1.toFixed(3)} (s=${res.sv1.toFixed(3)}, n=${res.nv1})`}/><StatRow label="Group 2 x̄₂" value={`${res.m2.toFixed(3)} (s=${res.sv2.toFixed(3)}, n=${res.nv2})`}/></>}<StatRow label="Difference (x̄₁−x̄₂)" value={res.diff.toFixed(4)}/><StatRow label="Standard Error" value={res.se.toFixed(4)}/><StatRow label="df (Welch–Satterthwaite)" value={res.df.toFixed(2)}/><StatRow label="T Statistic" value={res.stat.toFixed(4)} highlight/><StatRow label={`Critical Value (t*${res.tail==="two"?" ±":""})`} value={res.critical.toFixed(4)}/><StatRow label="P-value (approx.)" value={res.pVal.toFixed(4)}/>{!testMode&&{!testMode&&<DecisionNote pVal={res.pVal} alpha={res.alpha}/>}}</div>}</Card>;
 }
-function ChiSquareTest() {
+function ChiSquareTest({testMode=false}) {
   const [chiMode,setChiMode]=useState("gof"),[alpha,setAlpha]=useState("0.05"),[observed,setObserved]=useState("30, 25, 20, 15, 10"),[expected,setExpected]=useState("20, 20, 20, 20, 20"),[rows,setRows]=useState("2"),[cols,setCols]=useState("3"),[tableData,setTableData]=useState([["45","30","25"],["35","40","25"]]),[res,setRes]=useState(null),[err,setErr]=useState("");
   const updCell=(r,c,v)=>{const n=tableData.map(row=>[...row]);if(!n[r])n[r]=[];n[r][c]=v;setTableData(n);};
   const resizeT=(nr,nc)=>setTableData(Array.from({length:nr},(_,r)=>Array.from({length:nc},(_,c)=>(tableData[r]&&tableData[r][c])||"0")));
@@ -239,7 +382,7 @@ function ChiSquareTest() {
     {chiMode==="gof"?<><DataInput label="Observed (O):" value={observed} onChange={setObserved}/><DataInput label="Expected (E):" value={expected} onChange={setExpected}/><Note>💡 H₀: Data fits the expected distribution. All expected counts should be ≥ 5 ideally.</Note></>:<><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}><Sel label="Rows" value={rows} onChange={v=>{setRows(v);resizeT(+v,+cols);}} options={[["2","2"],["3","3"],["4","4"],["5","5"]]}/><Sel label="Columns" value={cols} onChange={v=>{setCols(v);resizeT(+rows,+v);}} options={[["2","2"],["3","3"],["4","4"],["5","5"]]}/></div><div style={{fontSize:12,fontWeight:600,color:"#475569",marginBottom:6}}>Observed Frequency Table:</div><div style={{overflowX:"auto",marginBottom:8}}><table style={{borderCollapse:"collapse"}}><thead><tr><th></th>{Array.from({length:+cols},(_,c)=><th key={c} style={{fontSize:11,color:"#2563eb",padding:"3px 10px"}}>Col {c+1}</th>)}</tr></thead><tbody>{Array.from({length:+rows},(_,r)=><tr key={r}><td style={{fontSize:11,color:"#94a3b8",paddingRight:7}}>Row {r+1}</td>{Array.from({length:+cols},(_,c)=><td key={c} style={{padding:3}}><input type="number" value={(tableData[r]&&tableData[r][c])||"0"} onChange={e=>updCell(r,c,e.target.value)} min={0} style={{width:58,padding:"6px 7px",border:"1px solid #cbd5e1",borderRadius:5,fontSize:13,textAlign:"center",outline:"none"}}/></td>)}</tr>)}</tbody></table></div><Note>💡 H₀: The two variables are independent. H₁: They are associated. Each expected cell should be ≥ 5.</Note></>}
     <div style={{marginTop:10}}><Sel label="Significance (α)" value={alpha} onChange={setAlpha} options={[["0.10","0.10"],["0.05","0.05"],["0.02","0.02"],["0.01","0.01"]]}/></div>
     <Btn onClick={chiMode==="gof"?calcGOF:calcInd}>Run Chi-Square Test</Btn><ErrMsg msg={err}/>
-    {res&&<div style={{marginTop:14}}><ResultBanner reject={res.reject} alpha={res.alpha}/><StatRow label="χ² Statistic" value={res.chiSq.toFixed(4)} highlight/><StatRow label="df" value={res.df}/><StatRow label="Critical Value (χ²*)" value={res.critical.toFixed(4)}/><StatRow label="P-value" value={res.pVal.toFixed(4)}/><DecisionNote pVal={res.pVal} alpha={res.alpha}/>
+    {res&&<div style={{marginTop:14}}>{!testMode&&<ResultBanner reject={res.reject} alpha={res.alpha}/>}<StatRow label="χ² Statistic" value={res.chiSq.toFixed(4)} highlight/><StatRow label="df" value={res.df}/><StatRow label="Critical Value (χ²*)" value={res.critical.toFixed(4)}/><StatRow label="P-value" value={res.pVal.toFixed(4)}/>{!testMode&&<DecisionNote pVal={res.pVal} alpha={res.alpha}/>}
       {res.type==="gof"&&<><div style={{marginTop:12,fontWeight:700,fontSize:13,color:"#1e3a8a",marginBottom:5}}>Cell Contributions</div><table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}><thead><tr style={{background:"#eff6ff"}}>{["Category","O","E","O−E","(O−E)²/E"].map(h=><th key={h} style={{padding:"5px 8px",textAlign:"left",color:"#1e3a8a",borderBottom:"2px solid #bfdbfe"}}>{h}</th>)}</tr></thead><tbody>{res.cells.map((c,i)=><tr key={i} style={{borderBottom:"1px solid #e2e8f0",background:i%2?"#fff":"#f8fafc"}}><td style={{padding:"5px 8px"}}>Cat {i+1}</td><td style={{padding:"5px 8px"}}>{c.o}</td><td style={{padding:"5px 8px"}}>{c.e.toFixed(2)}</td><td style={{padding:"5px 8px",color:c.o-c.e>=0?"#059669":"#dc2626"}}>{(c.o-c.e).toFixed(2)}</td><td style={{padding:"5px 8px",fontWeight:700}}>{c.contrib.toFixed(4)}</td></tr>)}<tr style={{background:"#eff6ff",fontWeight:700}}><td colSpan={4} style={{padding:"5px 8px",color:"#1e3a8a"}}>Total χ²</td><td style={{padding:"5px 8px",color:"#1e3a8a"}}>{res.chiSq.toFixed(4)}</td></tr></tbody></table></>}
       {res.type==="ind"&&<><div style={{marginTop:12,fontWeight:700,fontSize:13,color:"#1e3a8a",marginBottom:5}}>Expected Frequencies</div><div style={{overflowX:"auto"}}><table style={{borderCollapse:"collapse",fontSize:12}}><thead><tr style={{background:"#eff6ff"}}><th></th>{Array.from({length:res.nc},(_,c)=><th key={c} style={{padding:"4px 10px",color:"#1e3a8a"}}>Col {c+1}</th>)}<th style={{padding:"4px 10px",color:"#1e3a8a"}}>Σ</th></tr></thead><tbody>{res.expected2.map((row,r)=><tr key={r} style={{borderBottom:"1px solid #e2e8f0"}}><td style={{fontSize:11,color:"#94a3b8",padding:"4px 8px"}}>Row {r+1}</td>{row.map((e,c)=><td key={c} style={{padding:"4px 10px",textAlign:"center",background:e<5?"#fef2f2":"#f8fafc",border:"1px solid #e2e8f0"}}><span style={{fontWeight:600}}>{e.toFixed(2)}</span>{e<5&&<span style={{color:"#dc2626",fontSize:9}}> ⚠️</span>}</td>)}<td style={{padding:"4px 10px",textAlign:"center",fontWeight:700,color:"#475569"}}>{res.rowSums[r]}</td></tr>)}<tr style={{background:"#eff6ff",fontWeight:700}}><td style={{padding:"4px 8px",color:"#475569"}}>Σ</td>{res.colSums.map((s,c)=><td key={c} style={{padding:"4px 10px",textAlign:"center",color:"#475569"}}>{s}</td>)}<td style={{padding:"4px 10px",textAlign:"center",color:"#1e3a8a"}}>{res.total}</td></tr></tbody></table></div><Note>⚠️ = expected frequency &lt; 5, may reduce accuracy.</Note></>}
     </div>}
@@ -249,7 +392,7 @@ function ChiSquareTest() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // TAB 3: CONFIDENCE INTERVALS
 // ═══════════════════════════════════════════════════════════════════════════════
-function ConfidenceTab() {
+function ConfidenceTab({testMode=false}) {
   const [type,setType]=useState("mean"),[xbar,setXbar]=useState("82"),[s,setS]=useState("10"),[n,setN]=useState("30"),[cl,setCl]=useState("95"),[phat,setPhat]=useState("0.62"),[res,setRes]=useState(null);
   const calc=()=>{const nv=+n,conf=+cl/100,alpha=1-conf,z=normalInv(1-alpha/2);if(type==="mean"){const m=+xbar,sv=+s,t=tCritical(nv-1,alpha),moe=(nv>=30?z:t)*sv/Math.sqrt(nv);setRes({lo:m-moe,hi:m+moe,moe,critical:nv>=30?z:t,type:"mean",useT:nv<30,n:nv});}else{const p=+phat,moe=z*Math.sqrt(p*(1-p)/nv);setRes({lo:p-moe,hi:p+moe,moe,critical:z,type:"prop",n:nv});}};
   return <div>
@@ -279,7 +422,7 @@ function ConfidenceTab() {
 // TAB 4: DISTRIBUTION CALCULATOR
 // ═══════════════════════════════════════════════════════════════════════════════
 const DIST_TYPES=[["normal","Normal"],["binomial","Binomial"],["t","Student's t"],["chisq","Chi-Square"]];
-function DistributionsTab() {
+function DistributionsTab({testMode=false}) {
   const [dist,setDist]=useState("normal");
   return <div>
     <Card title="Select Distribution" accent="#0891b2">
@@ -295,7 +438,7 @@ function DistributionsTab() {
   </div>;
 }
 
-function NormalDist() {
+function NormalDist({testMode=false}) {
   const [mu,setMu]=useState("0"),[sigma,setSigma]=useState("1"),[x,setX]=useState("1.5"),[dir,setDir]=useState("below"),[prob,setProb]=useState("0.95"),[mode2,setMode2]=useState("prob"); // prob=value→prob, inv=prob→value
   const res=useMemo(()=>{
     const m=+mu,s=+sigma,xv=+x,p=+prob;
@@ -338,7 +481,7 @@ function NormalDist() {
         <StatRow label="P(X ≤ x) — left tail" value={`${(res.pBelow*100).toFixed(4)}%`}/>
         <StatRow label="P(X ≥ x) — right tail" value={`${(res.pAbove*100).toFixed(4)}%`}/>
         <StatRow label="P(μ−|z|σ ≤ X ≤ μ+|z|σ)" value={`${(res.pBetween*100).toFixed(4)}%`}/>
-        <Note>💡 Empirical Rule: 68.27% within ±1σ | 95.45% within ±2σ | 99.73% within ±3σ</Note>
+        {!testMode&&<Note>💡 Empirical Rule: 68.27% within ±1σ | 95.45% within ±2σ | 99.73% within ±3σ</Note>}
       </Card>:<Card title="Inverse Normal Result" accent="#059669">
         <div style={{textAlign:"center",background:"#f0fdf4",borderRadius:9,padding:"14px",marginBottom:10}}>
           <div style={{fontSize:11,color:"#64748b",marginBottom:3}}>{dir==="below"?`P(X ≤ x) = ${res.p}`:dir==="above"?`P(X ≥ x) = ${res.p}`:`P(|X−μ| ≤ c) = ${res.p}`}</div>
@@ -351,7 +494,7 @@ function NormalDist() {
   </div>;
 }
 
-function BinomialDist() {
+function BinomialDist({testMode=false}) {
   const [n,setN]=useState("20"),[p,setP]=useState("0.3"),[k,setK]=useState("6"),[prob,setProb]=useState("0.5"),[mode2,setMode2]=useState("prob");
   const nv=+n,pv=+p,kv=Math.round(+k),probv=+prob;
   const pmf=useMemo(()=>Array.from({length:nv+1},(_,i)=>({x:i,y:binomPMF(i,nv,pv)})),[nv,pv]);
@@ -382,13 +525,13 @@ function BinomialDist() {
       <Card title={mode2==="prob"?"Probabilities for k = "+kv:"Inverse Binomial"} accent="#7c3aed">
         {mode2==="prob"?<><StatRow label={`P(X = ${kv}) — exact`} value={res.pmf.toFixed(6)} highlight/><StatRow label={`P(X ≤ ${kv}) — at most`} value={res.cdfBelow.toFixed(6)}/><StatRow label={`P(X ≥ ${kv}) — at least`} value={res.cdfAbove.toFixed(6)}/><StatRow label={`P(X < ${kv}) — less than`} value={(res.cdfBelow-res.pmf).toFixed(6)}/><StatRow label={`P(X > ${kv}) — more than`} value={(1-res.cdfBelow).toFixed(6)}/></>:
         <div style={{textAlign:"center",background:"#f5f3ff",borderRadius:9,padding:"14px",marginBottom:10}}><div style={{fontSize:11,color:"#64748b",marginBottom:3}}>Smallest k where P(X ≤ k) ≥ {probv}</div><div style={{fontSize:24,fontWeight:800,color:"#5b21b6",fontFamily:"monospace"}}>k = {res.invK}</div><div style={{fontSize:12,color:"#64748b",marginTop:4}}>P(X ≤ {res.invK}) = {binomCDF(res.invK,nv,pv).toFixed(6)}</div></div>}
-        <div style={{borderTop:"1px solid #e2e8f0",paddingTop:10,marginTop:8}}><StatRow label="Mean (μ = np)" value={(nv*pv).toFixed(4)}/><StatRow label="Std Dev (σ = √npq)" value={Math.sqrt(nv*pv*(1-pv)).toFixed(4)}/></div>
+        {!testMode&&<div style={{borderTop:"1px solid #e2e8f0",paddingTop:10,marginTop:8}}><StatRow label="Mean (μ = np)" value={(nv*pv).toFixed(4)}/><StatRow label="Std Dev (σ = √npq)" value={Math.sqrt(nv*pv*(1-pv)).toFixed(4)}/></div>}
       </Card>
     </>}
   </div>;
 }
 
-function TDist() {
+function TDist({testMode=false}) {
   const [df,setDf]=useState("10"),[t,setT]=useState("2.0"),[prob,setProb]=useState("0.95"),[tail,setTail]=useState("two"),[mode2,setMode2]=useState("prob");
   const dfv=Math.max(1,Math.round(+df));
   const res=useMemo(()=>{
@@ -430,14 +573,14 @@ function TDist() {
         </svg>
       </Card>
       <Card title={mode2==="prob"?"P-value":"Critical t-Value"} accent="#d97706">
-        {mode2==="prob"?<><StatRow label={`P-value (${tail}-tailed)`} value={res.pVal.toFixed(6)} highlight/><Note>💡 If this is a test statistic: {res.pVal<.05?"P-value < 0.05 → would reject H₀ at α=0.05":"P-value ≥ 0.05 → would fail to reject H₀ at α=0.05"}</Note></>:
-        <><div style={{textAlign:"center",background:"#fffbeb",borderRadius:9,padding:"14px",marginBottom:10}}><div style={{fontSize:11,color:"#64748b",marginBottom:3}}>Critical t-value ({tail}-tailed, df={dfv})</div><div style={{fontSize:24,fontWeight:800,color:"#92400e",fontFamily:"monospace"}}>t* = {tail==="two"?`±${Math.abs(res.invT).toFixed(4)}`:res.invT.toFixed(4)}</div></div><Note>💡 For a {tail}-tailed test at α = {(+prob).toFixed(3)} with df = {dfv}: reject H₀ if |t| {">"} {Math.abs(res.invT).toFixed(4)}</Note></>}
+        {mode2==="prob"?<><StatRow label={`P-value (${tail}-tailed)`} value={res.pVal.toFixed(6)} highlight/>{!testMode&&<Note>💡 If this is a test statistic: {res.pVal<.05?"P-value < 0.05 → would reject H₀ at α=0.05":"P-value ≥ 0.05 → would fail to reject H₀ at α=0.05"}</Note>}</>:
+        <><div style={{textAlign:"center",background:"#fffbeb",borderRadius:9,padding:"14px",marginBottom:10}}><div style={{fontSize:11,color:"#64748b",marginBottom:3}}>Critical t-value ({tail}-tailed, df={dfv})</div><div style={{fontSize:24,fontWeight:800,color:"#92400e",fontFamily:"monospace"}}>t* = {tail==="two"?`±${Math.abs(res.invT).toFixed(4)}`:res.invT.toFixed(4)}</div></div>{!testMode&&<Note>💡 For a {tail}-tailed test at α = {(+prob).toFixed(3)} with df = {dfv}: reject H₀ if |t| {">"} {Math.abs(res.invT).toFixed(4)}</Note>}</>}
       </Card>
     </>}
   </div>;
 }
 
-function ChiSqDist() {
+function ChiSqDist({testMode=false}) {
   const [df,setDf]=useState("5"),[x,setX]=useState("9.0"),[prob,setProb]=useState("0.95"),[mode2,setMode2]=useState("prob");
   const dfv=Math.max(1,Math.round(+df));
   const xMax=Math.max(20,dfv*4);
@@ -469,8 +612,8 @@ function ChiSqDist() {
         </svg>
       </Card>
       <Card title={mode2==="prob"?"Probabilities":"Critical Values"} accent="#059669">
-        {mode2==="prob"?<><StatRow label="P(χ² ≤ x) — left tail" value={(res.pBelow*100).toFixed(4)+"%"} highlight/><StatRow label="P(χ² ≥ x) — right tail (p-value)" value={(res.pAbove*100).toFixed(4)+"%"}/><Note>💡 For chi-square tests: the p-value is the right-tail probability P(χ² ≥ observed statistic).</Note></>:
-        <><StatRow label={`χ²* (left tail, P ≤ ${res.pv})`} value={res.invXRight.toFixed(4)}/><StatRow label={`χ²* (right tail, P ≥ ${1-res.pv})`} value={res.invX.toFixed(4)} highlight/><Note>💡 Green dashed = right-tail critical value (used in most chi-square tests). Red dashed = left-tail critical value (used in variance tests).</Note></>}
+        {mode2==="prob"?<><StatRow label="P(χ² ≤ x) — left tail" value={(res.pBelow*100).toFixed(4)+"%"} highlight/><StatRow label="P(χ² ≥ x) — right tail (p-value)" value={(res.pAbove*100).toFixed(4)+"%"}/>{!testMode&&<Note>💡 For chi-square tests: the p-value is the right-tail probability P(χ² ≥ observed statistic).</Note>}</>:
+        <><StatRow label={`χ²* (left tail, P ≤ ${res.pv})`} value={res.invXRight.toFixed(4)}/><StatRow label={`χ²* (right tail, P ≥ ${1-res.pv})`} value={res.invX.toFixed(4)} highlight/>{!testMode&&<Note>💡 Green dashed = right-tail critical value (used in most chi-square tests). Red dashed = left-tail critical value (used in variance tests).</Note>}</>}
       </Card>
     </>}
   </div>;
@@ -479,7 +622,7 @@ function ChiSqDist() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // TAB 5: REGRESSION
 // ═══════════════════════════════════════════════════════════════════════════════
-function RegressionTab({initXRaw="",initYRaw=""}) {
+function RegressionTab({initXRaw="",initYRaw="",testMode=false}) {
   const [xRaw,setXRaw]=useState(initXRaw||"2, 4, 6, 8, 10, 12, 14, 16"),[yRaw,setYRaw]=useState(initYRaw||"5, 9, 12, 17, 21, 24, 28, 33"),[predX,setPredX]=useState("18"),[res,setRes]=useState(null);
   useMemo(()=>{if(initXRaw)setXRaw(initXRaw);},[initXRaw]);
   useMemo(()=>{if(initYRaw)setYRaw(initYRaw);},[initYRaw]);
@@ -499,7 +642,7 @@ function RegressionTab({initXRaw="",initYRaw=""}) {
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
         <StatRow label="Slope (b)" value={res.slope.toFixed(4)} highlight/><StatRow label="Intercept (a)" value={res.intercept.toFixed(4)}/><StatRow label="Correlation (r)" value={res.r.toFixed(4)} highlight/><StatRow label="r²" value={res.r2.toFixed(4)}/>
       </div>
-      <Note>💡 r = {res.r.toFixed(3)} → {Math.abs(res.r)>=.8?"Strong":Math.abs(res.r)>=.5?"Moderate":"Weak"} {res.r>0?"positive":"negative"} correlation. r² = {(res.r2*100).toFixed(1)}% of variation in Y explained by X.</Note>
+      {!testMode&&<Note>💡 r = {res.r.toFixed(3)} → {Math.abs(res.r)>=.8?"Strong":Math.abs(res.r)>=.5?"Moderate":"Weak"} {res.r>0?"positive":"negative"} correlation. r² = {(res.r2*100).toFixed(1)}% of variation in Y explained by X.</Note>}
     </Card>
     <Card title="Prediction" accent="#7c3aed"><StatRow label={`Predicted Y when X = ${res.predX}`} value={res.predY.toFixed(4)} highlight/></Card>
     <Card title="Scatter Plot" accent="#0891b2">
@@ -514,7 +657,7 @@ function RegressionTab({initXRaw="",initYRaw=""}) {
 // ═══════════════════════════════════════════════════════════════════════════════
 const VIZ_TYPES=[["histogram","Histogram"],["bar","Bar Chart"],["boxplot","Box Plot"],["scatter","Scatter Plot"],["ogive","Ogive"],["freqpoly","Frequency Polygon"],["stemleaf","Stem & Leaf"],["dotplot","Dot Plot"],["qq","Q-Q Plot"]];
 
-function VisualizationsTab({initData="",initData2=""}) {
+function VisualizationsTab({initData="",initData2="",testMode=false}) {
   const [viz,setViz]=useState("histogram");
   const needsXY=["scatter","qq"].includes(viz);
   const needsCat=["bar"].includes(viz);
@@ -544,11 +687,11 @@ function VisualizationsTab({initData="",initData2=""}) {
     </Card>}
     {viz==="histogram"&&<HistogramViz data={data} bins={+bins}/>}
     {viz==="bar"&&<BarChartViz cats={catArr} vals={valArr}/>}
-    {viz==="boxplot"&&<BoxPlotViz data={data}/>}
+    {viz==="boxplot"&&<BoxPlotViz data={data} testMode={testMode}/>}
     {viz==="scatter"&&<ScatterViz xs={data} ys={data2}/>}
-    {viz==="ogive"&&<OgiveViz data={data} bins={+bins}/>}
-    {viz==="freqpoly"&&<FreqPolyViz data={data} bins={+bins}/>}
-    {viz==="stemleaf"&&<StemLeafViz data={data}/>}
+    {viz==="ogive"&&<OgiveViz data={data} bins={+bins} testMode={testMode}/>}
+    {viz==="freqpoly"&&<FreqPolyViz data={data} bins={+bins} testMode={testMode}/>}
+    {viz==="stemleaf"&&<StemLeafViz data={data} testMode={testMode}/>}
     {viz==="dotplot"&&<DotPlotViz data={data}/>}
     {viz==="qq"&&<QQPlotViz data={data}/>}
   </div>;
@@ -562,14 +705,17 @@ function HistogramViz({data,bins}) {
   const maxC=Math.max(...counts);
   const sx=mkScaleX(mn,mx+bw*0.01),sy=mkScaleY(0,maxC*1.1);
   const m=mean(data),med=median(data);
+  const svgRef=useRef(null);
   return <Card title="Histogram" accent="#4f8ef7">
-    <svg width={SVG_W} height={SVG_H} style={{overflow:"visible",maxWidth:"100%"}}>
-      {counts.map((c,i)=>{const x0=mn+i*bw,x1=mn+(i+1)*bw,barH=(c/maxC/1.1)*chartH;return <g key={i}><rect x={sx(x0)+1} y={SVG_H-pad.b-barH} width={sx(x1)-sx(x0)-2} height={barH} fill="#4f8ef7" opacity={.85} rx={2}/><text x={(sx(x0)+sx(x1))/2} y={SVG_H-pad.b-barH-4} fontSize={9} fill="#475569" textAnchor="middle">{c>0?c:""}</text></g>;})}
-      <line x1={sx(m)} y1={pad.t} x2={sx(m)} y2={SVG_H-pad.b} stroke="#f97316" strokeWidth={2} strokeDasharray="5,3"/><text x={sx(m)+4} y={pad.t+12} fill="#f97316" fontSize={9}>x̄={m.toFixed(1)}</text>
-      <line x1={sx(med)} y1={pad.t} x2={sx(med)} y2={SVG_H-pad.b} stroke="#059669" strokeWidth={2} strokeDasharray="5,3"/><text x={sx(med)+4} y={pad.t+24} fill="#059669" fontSize={9}>med={med.toFixed(1)}</text>
-      <Axis xMin={mn} xMax={mx+bw*.01} yMin={0} yMax={maxC*1.1} ticks={bins} xLabel="Value" yLabel="Frequency"/>
-    </svg>
-    <div style={{fontSize:11,color:"#64748b",marginTop:4}}>Orange = mean | Green = median | n = {data.length}</div>
+    <ChartToolbar svgRef={svgRef} filename="histogram">
+      <svg ref={svgRef} width={SVG_W} height={SVG_H} viewBox={`0 0 ${SVG_W} ${SVG_H}`} style={{overflow:"visible",maxWidth:"100%"}}>
+        {counts.map((c,i)=>{const x0=mn+i*bw,x1=mn+(i+1)*bw,barH=(c/maxC/1.1)*chartH;return <g key={i}><rect x={sx(x0)+1} y={SVG_H-pad.b-barH} width={sx(x1)-sx(x0)-2} height={barH} fill="#4f8ef7" opacity={.85} rx={2}/><text x={(sx(x0)+sx(x1))/2} y={SVG_H-pad.b-barH-4} fontSize={9} fill="#475569" textAnchor="middle">{c>0?c:""}</text></g>;})}
+        <line x1={sx(m)} y1={pad.t} x2={sx(m)} y2={SVG_H-pad.b} stroke="#f97316" strokeWidth={2} strokeDasharray="5,3"/><text x={sx(m)+4} y={pad.t+12} fill="#f97316" fontSize={9}>x̄={m.toFixed(1)}</text>
+        <line x1={sx(med)} y1={pad.t} x2={sx(med)} y2={SVG_H-pad.b} stroke="#059669" strokeWidth={2} strokeDasharray="5,3"/><text x={sx(med)+4} y={pad.t+24} fill="#059669" fontSize={9}>med={med.toFixed(1)}</text>
+        <Axis xMin={mn} xMax={mx+bw*.01} yMin={0} yMax={maxC*1.1} ticks={bins} xLabel="Value" yLabel="Frequency"/>
+      </svg>
+      <div style={{fontSize:11,color:"#64748b",marginTop:4}}>Orange = mean | Green = median | n = {data.length}</div>
+    </ChartToolbar>
   </Card>;
 }
 
@@ -580,17 +726,20 @@ function BarChartViz({cats,vals}) {
   const bw=chartW/pairs.length;
   const sy=mkScaleY(0,maxV*1.15);
   const colors=["#4f8ef7","#059669","#f97316","#8b5cf6","#dc2626","#0891b2","#d97706"];
+  const svgRef=useRef(null);
   return <Card title="Bar Chart" accent="#059669">
-    <svg width={SVG_W} height={SVG_H} style={{overflow:"visible",maxWidth:"100%"}}>
-      {pairs.map((p,i)=>{const x0=pad.l+i*bw+bw*.1,w=bw*.8,barH=(p.val/maxV/1.15)*chartH;return <g key={i}><rect x={x0} y={SVG_H-pad.b-barH} width={w} height={barH} fill={colors[i%colors.length]} opacity={.85} rx={3}/><text x={x0+w/2} y={SVG_H-pad.b-barH-5} fontSize={9} fill="#475569" textAnchor="middle">{p.val}</text><text x={x0+w/2} y={SVG_H-pad.b+14} fontSize={9} fill="#64748b" textAnchor="middle">{p.cat.length>8?p.cat.slice(0,7)+"…":p.cat}</text></g>;})}
-      <line x1={pad.l} y1={SVG_H-pad.b} x2={SVG_W-pad.r} y2={SVG_H-pad.b} stroke="#94a3b8"/>
-      <line x1={pad.l} y1={pad.t} x2={pad.l} y2={SVG_H-pad.b} stroke="#94a3b8"/>
-      {[0,.25,.5,.75,1].map((p,i)=>{const v=maxV*1.15*p;return <g key={i}><line x1={pad.l-4} y1={sy(v)} x2={pad.l} y2={sy(v)} stroke="#94a3b8"/><text x={pad.l-6} y={sy(v)+3} fontSize={8} fill="#64748b" textAnchor="end">{v.toFixed(0)}</text></g>;})}
-    </svg>
+    <ChartToolbar svgRef={svgRef} filename="bar_chart">
+      <svg ref={svgRef} width={SVG_W} height={SVG_H} viewBox={`0 0 ${SVG_W} ${SVG_H}`} style={{overflow:"visible",maxWidth:"100%"}}>
+        {pairs.map((p,i)=>{const x0=pad.l+i*bw+bw*.1,w=bw*.8,barH=(p.val/maxV/1.15)*chartH;return <g key={i}><rect x={x0} y={SVG_H-pad.b-barH} width={w} height={barH} fill={colors[i%colors.length]} opacity={.85} rx={3}/><text x={x0+w/2} y={SVG_H-pad.b-barH-5} fontSize={9} fill="#475569" textAnchor="middle">{p.val}</text><text x={x0+w/2} y={SVG_H-pad.b+14} fontSize={9} fill="#64748b" textAnchor="middle">{p.cat.length>8?p.cat.slice(0,7)+"…":p.cat}</text></g>;})}
+        <line x1={pad.l} y1={SVG_H-pad.b} x2={SVG_W-pad.r} y2={SVG_H-pad.b} stroke="#94a3b8"/>
+        <line x1={pad.l} y1={pad.t} x2={pad.l} y2={SVG_H-pad.b} stroke="#94a3b8"/>
+        {[0,.25,.5,.75,1].map((p,i)=>{const v=maxV*1.15*p;return <g key={i}><line x1={pad.l-4} y1={sy(v)} x2={pad.l} y2={sy(v)} stroke="#94a3b8"/><text x={pad.l-6} y={sy(v)+3} fontSize={8} fill="#64748b" textAnchor="end">{v.toFixed(0)}</text></g>;})}
+      </svg>
+    </ChartToolbar>
   </Card>;
 }
 
-function BoxPlotViz({data}) {
+function BoxPlotViz({data,testMode=false}) {
   if(data.length<4) return null;
   const {q1,q2,q3,min,max}=quartiles(data);
   const iqr=q3-q1,loF=q1-1.5*iqr,hiF=q3+1.5*iqr;
@@ -598,8 +747,10 @@ function BoxPlotViz({data}) {
   const outliers=data.filter(x=>x<loF||x>hiF);
   const pad2=40,W=SVG_W,H=160,cw=W-pad2*2,my=H/2;
   const sc=v=>pad2+(v-min)/(max-min||1)*cw;
+  const svgRef=useRef(null);
   return <Card title="Box Plot" accent="#d97706">
-    <svg width={W} height={H} style={{overflow:"visible",maxWidth:"100%"}}>
+    <ChartToolbar svgRef={svgRef} filename="box_plot">
+    <svg ref={svgRef} width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{overflow:"visible",maxWidth:"100%"}}>
       <line x1={pad2} y1={H-30} x2={W-pad2} y2={H-30} stroke="#94a3b8"/>
       {[min,q1,q2,q3,max].map((v,i)=><text key={i} x={sc(v)} y={H-15} fontSize={9} fill="#64748b" textAnchor="middle">{v.toFixed(1)}</text>)}
       <line x1={sc(lo)} y1={my} x2={sc(hi)} y2={my} stroke="#d97706" strokeWidth={2}/>
@@ -614,7 +765,8 @@ function BoxPlotViz({data}) {
     <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6,textAlign:"center",marginTop:8}}>
       {[["Min",min],["Q1",q1],["Median",q2],["Q3",q3],["Max",max]].map(([l,v])=><div key={l} style={{background:"#fffbeb",borderRadius:5,padding:"6px 2px"}}><div style={{fontSize:9,color:"#92400e"}}>{l}</div><div style={{fontWeight:700,fontSize:12,color:"#d97706"}}>{v.toFixed(2)}</div></div>)}
     </div>
-    <Note>💡 IQR = {iqr.toFixed(2)} | Outlier fences: [{loF.toFixed(2)}, {hiF.toFixed(2)}] | {outliers.length} outlier{outliers.length!==1?"s":""} detected</Note>
+    {!testMode&&<Note>💡 IQR = {iqr.toFixed(2)} | Outlier fences: [{loF.toFixed(2)}, {hiF.toFixed(2)}] | {outliers.length} outlier{outliers.length!==1?"s":""} detected</Note>}
+    </ChartToolbar>
   </Card>;
 }
 
@@ -626,17 +778,20 @@ function ScatterViz({xs,ys}) {
   const sx=mkScaleX(mnX-(mxX-mnX)*.05,mxX+(mxX-mnX)*.05);
   const sy=mkScaleY(mnY-(mxY-mnY)*.05,mxY+(mxY-mnY)*.05);
   const x0=mnX-(mxX-mnX)*.05,x1=mxX+(mxX-mnX)*.05;
+  const svgRef=useRef(null);
   return <Card title="Scatter Plot" accent="#0891b2">
-    <svg width={SVG_W} height={SVG_H} style={{overflow:"visible",maxWidth:"100%"}}>
-      <Axis xMin={mnX-(mxX-mnX)*.05} xMax={mxX+(mxX-mnX)*.05} yMin={mnY-(mxY-mnY)*.05} yMax={mxY+(mxY-mnY)*.05} ticks={5} xLabel="X" yLabel="Y"/>
-      <line x1={sx(x0)} y1={sy(reg.intercept+reg.slope*x0)} x2={sx(x1)} y2={sy(reg.intercept+reg.slope*x1)} stroke="#f97316" strokeWidth={2} strokeDasharray="6,3" opacity={.8}/>
-      {xd.map((x,i)=><circle key={i} cx={sx(x)} cy={sy(yd[i])} r={5} fill="#0891b2" opacity={.75}/>)}
-    </svg>
-    <Note>💡 r = {reg.r.toFixed(4)} | ŷ = {reg.intercept.toFixed(3)} + {reg.slope.toFixed(3)}x | Orange = regression line</Note>
+    <ChartToolbar svgRef={svgRef} filename="scatter_plot">
+      <svg ref={svgRef} width={SVG_W} height={SVG_H} viewBox={`0 0 ${SVG_W} ${SVG_H}`} style={{overflow:"visible",maxWidth:"100%"}}>
+        <Axis xMin={mnX-(mxX-mnX)*.05} xMax={mxX+(mxX-mnX)*.05} yMin={mnY-(mxY-mnY)*.05} yMax={mxY+(mxY-mnY)*.05} ticks={5} xLabel="X" yLabel="Y"/>
+        <line x1={sx(x0)} y1={sy(reg.intercept+reg.slope*x0)} x2={sx(x1)} y2={sy(reg.intercept+reg.slope*x1)} stroke="#f97316" strokeWidth={2} strokeDasharray="6,3" opacity={.8}/>
+        {xd.map((x,i)=><circle key={i} cx={sx(x)} cy={sy(yd[i])} r={5} fill="#0891b2" opacity={.75}/>)}
+      </svg>
+      <Note>💡 r = {reg.r.toFixed(4)} | ŷ = {reg.intercept.toFixed(3)} + {reg.slope.toFixed(3)}x | Orange = regression line</Note>
+    </ChartToolbar>
   </Card>;
 }
 
-function OgiveViz({data,bins}) {
+function OgiveViz({data,bins,testMode=false}) {
   if(!data.length) return null;
   const mn=Math.min(...data),mx=Math.max(...data),bw=(mx-mn)/bins||1;
   const counts=Array(bins).fill(0);
@@ -647,19 +802,22 @@ function OgiveViz({data,bins}) {
   const pts=cumFreq.map((cf,i)=>({x:mn+i*bw,y:cf/totalN*100}));
   const sx=mkScaleX(mn,mx+bw),sy=mkScaleY(0,105);
   const path=`M ${pts.map(p=>`${sx(p.x)},${sy(p.y)}`).join(" L ")}`;
+  const ogSvgRef=useRef(null);
   return <Card title="Ogive (Cumulative Frequency Polygon)" accent="#8b5cf6">
-    <svg width={SVG_W} height={SVG_H} style={{overflow:"visible",maxWidth:"100%"}}>
-      <Axis xMin={mn} xMax={mx+bw} yMin={0} yMax={105} ticks={5} xLabel="Value" yLabel="Cumulative %"/>
-      {[25,50,75].map(p=><line key={p} x1={pad.l} y1={sy(p)} x2={SVG_W-pad.r} y2={sy(p)} stroke="#e2e8f0" strokeWidth={1} strokeDasharray="3,3"/>)}
-      <path d={path} fill="none" stroke="#8b5cf6" strokeWidth={2.5}/>
-      {pts.map((p,i)=><circle key={i} cx={sx(p.x)} cy={sy(p.y)} r={4} fill="#8b5cf6"/>)}
-      {[25,50,75].map(p=><text key={p} x={pad.l+4} y={sy(p)-4} fontSize={8} fill="#8b5cf6" opacity={.7}>{p}%</text>)}
-    </svg>
-    <Note>💡 Ogive shows the cumulative relative frequency. Read across from a % on the Y-axis to find the value at or below that percentile.</Note>
+    <ChartToolbar svgRef={ogSvgRef} filename="ogive">
+      <svg ref={ogSvgRef} width={SVG_W} height={SVG_H} viewBox={`0 0 ${SVG_W} ${SVG_H}`} style={{overflow:"visible",maxWidth:"100%"}}>
+        <Axis xMin={mn} xMax={mx+bw} yMin={0} yMax={105} ticks={5} xLabel="Value" yLabel="Cumulative %"/>
+        {[25,50,75].map(p=><line key={p} x1={pad.l} y1={sy(p)} x2={SVG_W-pad.r} y2={sy(p)} stroke="#e2e8f0" strokeWidth={1} strokeDasharray="3,3"/>)}
+        <path d={path} fill="none" stroke="#8b5cf6" strokeWidth={2.5}/>
+        {pts.map((p,i)=><circle key={i} cx={sx(p.x)} cy={sy(p.y)} r={4} fill="#8b5cf6"/>)}
+        {[25,50,75].map(p=><text key={p} x={pad.l+4} y={sy(p)-4} fontSize={8} fill="#8b5cf6" opacity={.7}>{p}%</text>)}
+      </svg>
+      {!testMode&&<Note>💡 Ogive shows the cumulative relative frequency. Read across from a % on the Y-axis to find the value at or below that percentile.</Note>}
+    </ChartToolbar>
   </Card>;
 }
 
-function FreqPolyViz({data,bins}) {
+function FreqPolyViz({data,bins,testMode=false}) {
   if(!data.length) return null;
   const mn=Math.min(...data),mx=Math.max(...data),bw=(mx-mn)/bins||1;
   const counts=Array(bins).fill(0);
@@ -669,18 +827,21 @@ function FreqPolyViz({data,bins}) {
   const pts=[{x:mn-bw*.5,y:0},...midpts.map((x,i)=>({x,y:counts[i]})),{x:mx+bw*.5,y:0}];
   const sx=mkScaleX(mn-bw,mx+bw),sy=mkScaleY(0,maxC*1.15);
   const path=`M ${pts.map(p=>`${sx(p.x)},${sy(p.y)}`).join(" L ")}`;
+  const fpSvgRef=useRef(null);
   return <Card title="Frequency Polygon" accent="#059669">
-    <svg width={SVG_W} height={SVG_H} style={{overflow:"visible",maxWidth:"100%"}}>
-      <Axis xMin={mn-bw} xMax={mx+bw} yMin={0} yMax={maxC*1.15} ticks={6} xLabel="Value" yLabel="Frequency"/>
-      {counts.map((_,i)=>{const x0=mn+i*bw,x1=mn+(i+1)*bw;const barH=(counts[i]/maxC/1.15)*chartH;return <rect key={i} x={sx(x0)+1} y={SVG_H-pad.b-barH} width={sx(x1)-sx(x0)-2} height={barH} fill="#059669" opacity={.15} rx={1}/>;})}
-      <path d={path} fill="none" stroke="#059669" strokeWidth={2.5}/>
-      {pts.slice(1,-1).map((p,i)=><circle key={i} cx={sx(p.x)} cy={sy(p.y)} r={4} fill="#059669"/>)}
-    </svg>
-    <Note>💡 Frequency polygon connects midpoints of histogram bars. Useful for comparing two distributions on the same graph.</Note>
+    <ChartToolbar svgRef={fpSvgRef} filename="frequency_polygon">
+      <svg ref={fpSvgRef} width={SVG_W} height={SVG_H} viewBox={`0 0 ${SVG_W} ${SVG_H}`} style={{overflow:"visible",maxWidth:"100%"}}>
+        <Axis xMin={mn-bw} xMax={mx+bw} yMin={0} yMax={maxC*1.15} ticks={6} xLabel="Value" yLabel="Frequency"/>
+        {counts.map((_,i)=>{const x0=mn+i*bw,x1=mn+(i+1)*bw;const barH=(counts[i]/maxC/1.15)*chartH;return <rect key={i} x={sx(x0)+1} y={SVG_H-pad.b-barH} width={sx(x1)-sx(x0)-2} height={barH} fill="#059669" opacity={.15} rx={1}/>;})}
+        <path d={path} fill="none" stroke="#059669" strokeWidth={2.5}/>
+        {pts.slice(1,-1).map((p,i)=><circle key={i} cx={sx(p.x)} cy={sy(p.y)} r={4} fill="#059669"/>)}
+      </svg>
+      {!testMode&&<Note>💡 Frequency polygon connects midpoints of histogram bars. Useful for comparing two distributions on the same graph.</Note>}
+    </ChartToolbar>
   </Card>;
 }
 
-function StemLeafViz({data}) {
+function StemLeafViz({data,testMode=false}) {
   if(data.length<2) return null;
   const sorted=[...data].sort((a,b)=>a-b);
   const stems={};
@@ -699,7 +860,7 @@ function StemLeafViz({data}) {
         <div style={{color:"#475569",letterSpacing:3}}>{stems[s].join("  ")}</div>
       </div>)}
     </div>
-    <Note>💡 Each stem = tens digit, each leaf = units digit. E.g., "7 | 2 5 8" represents 72, 75, 78. n = {data.length}</Note>
+    {!testMode&&<Note>💡 Each stem = tens digit, each leaf = units digit. E.g., "7 | 2 5 8" represents 72, 75, 78. n = {data.length}</Note>}
   </Card>;
 }
 
@@ -713,12 +874,15 @@ function DotPlotViz({data}) {
   const mn=Math.min(...keys),mx=Math.max(...keys);
   const sx=mkScaleX(mn-(mx-mn)*.05,mx+(mx-mn)*.05);
   const dotR=6,dotGap=2,baseY=SVG_H-pad.b;
+  const dpSvgRef=useRef(null);
   return <Card title="Dot Plot" accent="#f97316">
-    <svg width={SVG_W} height={SVG_H} style={{overflow:"visible",maxWidth:"100%"}}>
-      <line x1={pad.l} y1={baseY} x2={SVG_W-pad.r} y2={baseY} stroke="#94a3b8"/>
-      {keys.map((k,ki)=>{const cx=sx(k);return <g key={ki}>{Array.from({length:freq[k]},(_,i)=><circle key={i} cx={cx} cy={baseY-(i+1)*(dotR*2+dotGap)+dotR} r={dotR} fill="#f97316" opacity={.8}/>)}<text x={cx} y={baseY+14} fontSize={8} fill="#64748b" textAnchor="middle">{k}</text></g>;})}
-    </svg>
-    <Note>💡 Each dot represents one data value. Stacked dots show repeated values. n = {data.length}</Note>
+    <ChartToolbar svgRef={dpSvgRef} filename="dot_plot">
+      <svg ref={dpSvgRef} width={SVG_W} height={SVG_H} viewBox={`0 0 ${SVG_W} ${SVG_H}`} style={{overflow:"visible",maxWidth:"100%"}}>
+        <line x1={pad.l} y1={baseY} x2={SVG_W-pad.r} y2={baseY} stroke="#94a3b8"/>
+        {keys.map((k,ki)=>{const cx=sx(k);return <g key={ki}>{Array.from({length:freq[k]},(_,i)=><circle key={i} cx={cx} cy={baseY-(i+1)*(dotR*2+dotGap)+dotR} r={dotR} fill="#f97316" opacity={.8}/>)}<text x={cx} y={baseY+14} fontSize={8} fill="#64748b" textAnchor="middle">{k}</text></g>;})}
+      </svg>
+      <Note>💡 Each dot represents one data value. Stacked dots show repeated values. n = {data.length}</Note>
+    </ChartToolbar>
   </Card>;
 }
 
@@ -732,13 +896,16 @@ function QQPlotViz({data}) {
   const pad2=.3;
   const sx=mkScaleX(mnX-pad2,mxX+pad2),sy=mkScaleY(mnY-pad2,mxY+pad2);
   const lo=Math.min(mnX-pad2,mnY-pad2),hi=Math.max(mxX+pad2,mxY+pad2);
+  const qqSvgRef=useRef(null);
   return <Card title="Q-Q Plot (Normal Quantile Plot)" accent="#dc2626">
-    <svg width={SVG_W} height={SVG_H} style={{overflow:"visible",maxWidth:"100%"}}>
-      <Axis xMin={mnX-pad2} xMax={mxX+pad2} yMin={mnY-pad2} yMax={mxY+pad2} ticks={5} xLabel="Theoretical Quantiles (Normal)" yLabel="Sample Quantiles"/>
-      <line x1={sx(Math.max(mnX-pad2,mnY-pad2))} y1={sy(Math.max(mnX-pad2,mnY-pad2))} x2={sx(Math.min(mxX+pad2,mxY+pad2))} y2={sy(Math.min(mxX+pad2,mxY+pad2))} stroke="#dc2626" strokeWidth={1.5} strokeDasharray="5,4" opacity={.7}/>
-      {pts.map((p,i)=><circle key={i} cx={sx(p.th)} cy={sy(p.obs)} r={4} fill="#dc2626" opacity={.75}/>)}
-    </svg>
-    <Note>💡 If data is approximately normal, points fall close to the diagonal reference line. Systematic deviations suggest skewness or heavy tails. n = {data.length}</Note>
+    <ChartToolbar svgRef={qqSvgRef} filename="qq_plot">
+      <svg ref={qqSvgRef} width={SVG_W} height={SVG_H} viewBox={`0 0 ${SVG_W} ${SVG_H}`} style={{overflow:"visible",maxWidth:"100%"}}>
+        <Axis xMin={mnX-pad2} xMax={mxX+pad2} yMin={mnY-pad2} yMax={mxY+pad2} ticks={5} xLabel="Theoretical Quantiles (Normal)" yLabel="Sample Quantiles"/>
+        <line x1={sx(Math.max(mnX-pad2,mnY-pad2))} y1={sy(Math.max(mnX-pad2,mnY-pad2))} x2={sx(Math.min(mxX+pad2,mxY+pad2))} y2={sy(Math.min(mxX+pad2,mxY+pad2))} stroke="#dc2626" strokeWidth={1.5} strokeDasharray="5,4" opacity={.7}/>
+        {pts.map((p,i)=><circle key={i} cx={sx(p.th)} cy={sy(p.obs)} r={4} fill="#dc2626" opacity={.75}/>)}
+      </svg>
+      <Note>💡 If data is approximately normal, points fall close to the diagonal reference line. Systematic deviations suggest skewness or heavy tails. n = {data.length}</Note>
+    </ChartToolbar>
   </Card>;
 }
 
@@ -762,255 +929,192 @@ function parseCSV(text) {
   return { headers, rows, numericCols, rowCount: rows.length, delim };
 }
 
-function CSVUploadTab({ onDataLoaded, csvData }) {
-  const [dragOver, setDragOver] = useState(false);
-  const [err, setErr] = useState('');
-  const [preview, setPreview] = useState(null);
-  const [sendCol, setSendCol] = useState('');
+function CSVUploadTab({ onDataLoaded, csvData, csvData2, onDataLoaded2 }) {
+  // ── File A state ──
+  const [dragOverA, setDragOverA] = useState(false);
+  const [errA, setErrA] = useState('');
+  const [previewA, setPreviewA] = useState(null);
+  // ── File B state ──
+  const [dragOverB, setDragOverB] = useState(false);
+  const [errB, setErrB] = useState('');
+  const [previewB, setPreviewB] = useState(null);
+  // ── Send controls ──
+  const [sendCol, setSendCol]   = useState('');
   const [sendCol2, setSendCol2] = useState('');
+  const [sendSrc2, setSendSrc2] = useState('A'); // which file the second column comes from
   const [sendTarget, setSendTarget] = useState('descriptive');
-  const [sendMsg, setSendMsg] = useState('');
+  const [sendMsg, setSendMsg]   = useState('');
 
-  const processFile = (file) => {
+  const processFile = (file, slot) => {
     if (!file) return;
-    if (!file.name.match(/\.(csv|txt)$/i)) { setErr('Please upload a .csv or .txt file.'); return; }
-    setErr('');
+    if (!file.name.match(/\.(csv|txt)$/i)) {
+      slot==='A' ? setErrA('Please upload a .csv or .txt file.') : setErrB('Please upload a .csv or .txt file.');
+      return;
+    }
+    slot==='A' ? setErrA('') : setErrB('');
     const reader = new FileReader();
     reader.onload = (e) => {
-      const text = e.target.result;
-      const parsed = parseCSV(text);
-      if (!parsed) { setErr('Could not parse file. Make sure it has a header row and at least one data row.'); return; }
-      setPreview(parsed);
-      setSendCol(Object.keys(parsed.numericCols)[0] || '');
-      setSendCol2(Object.keys(parsed.numericCols)[1] || '');
-      onDataLoaded(parsed);
+      const parsed = parseCSV(e.target.result);
+      if (!parsed) {
+        slot==='A'
+          ? setErrA('Could not parse file. Make sure it has a header row and at least one data row.')
+          : setErrB('Could not parse file. Make sure it has a header row and at least one data row.');
+        return;
+      }
+      if (slot==='A') {
+        setPreviewA(parsed);
+        setSendCol(Object.keys(parsed.numericCols)[0] || '');
+        onDataLoaded(parsed);
+      } else {
+        setPreviewB(parsed);
+        setSendCol2(Object.keys(parsed.numericCols)[0] || '');
+        onDataLoaded2(parsed);
+      }
     };
     reader.readAsText(file);
   };
 
-  const handleDrop = (e) => {
-    e.preventDefault(); setDragOver(false);
-    processFile(e.dataTransfer.files[0]);
-  };
-
-  const numCols = preview ? Object.keys(preview.numericCols) : [];
+  const numColsA = previewA ? Object.keys(previewA.numericCols) : [];
+  const numColsB = previewB ? Object.keys(previewB.numericCols) : [];
+  const hasData  = previewA || previewB;
 
   const sendToTab = () => {
-    if (!preview || !sendCol) return;
-    const colData = preview.numericCols[sendCol];
-    const colData2 = preview.numericCols[sendCol2];
-    onDataLoaded(preview, sendTarget, sendCol, sendCol2);
-    setSendMsg(`✅ "${sendCol}" sent to ${sendTarget} tab! Switch to that tab and paste it in.`);
-    setTimeout(() => setSendMsg(''), 4000);
+    const srcA = previewA, srcB = previewB;
+    if (!srcA && !srcB) return;
+    const primary = srcA || srcB;
+    const colA = sendCol || (numColsA[0] || numColsB[0] || '');
+    const col2Src = sendSrc2==='B' && srcB ? srcB : primary;
+    const col2Key = sendSrc2==='B' && numColsB.length ? sendCol2 : sendCol2;
+    const vals  = primary.numericCols[colA] || [];
+    const vals2 = col2Src && col2Key ? (col2Src.numericCols[col2Key] || []) : [];
+    // Build a merged fake parsed object for routing
+    const merged = {
+      ...primary,
+      numericCols: { ...primary.numericCols, ...(previewB ? previewB.numericCols : {}) }
+    };
+    onDataLoaded(merged, sendTarget, colA, col2Key);
+    setSendMsg(`✅ Data sent to ${sendTarget} tab!`);
+    setTimeout(()=>setSendMsg(''), 4000);
   };
+
+  const UploadZone = ({slot, dragOver, setDragOver, err, preview}) => (
+    <Card title={'📂 CSV File '+slot+(preview?' — '+preview.rowCount+' rows':'')} accent={slot==='A'?'#8b5cf6':'#0891b2'}>
+      <div
+        onDragOver={e=>{e.preventDefault();setDragOver(true);}}
+        onDragLeave={()=>setDragOver(false)}
+        onDrop={e=>{e.preventDefault();setDragOver(false);processFile(e.dataTransfer.files[0],slot);}}
+        style={{border:`2px dashed ${dragOver?(slot==='A'?'#8b5cf6':'#0891b2'):'#cbd5e1'}`,borderRadius:10,padding:'22px 18px',textAlign:'center',background:dragOver?'#f5f3ff':'#fafafa',cursor:'pointer',transition:'all .2s',marginBottom:10}}
+        onClick={()=>document.getElementById(`csv-input-${slot}`).click()}
+      >
+        <div style={{fontSize:28,marginBottom:6}}>{preview?'✅':'📄'}</div>
+        <div style={{fontWeight:700,fontSize:13,color:slot==='A'?'#5b21b6':'#0e7490',marginBottom:3}}>
+          {preview ? preview.rowCount+' rows loaded — click to replace' : (dragOver?'Drop it here!':'Click to browse or drag & drop')}
+        </div>
+        <div style={{fontSize:11,color:'#94a3b8'}}>Supports .csv and .txt files</div>
+        <input id={`csv-input-${slot}`} type="file" accept=".csv,.txt" style={{display:'none'}}
+          onChange={e=>processFile(e.target.files[0],slot)}/>
+      </div>
+      {err && <ErrMsg msg={err}/>}
+      {preview && (
+        <>
+          <div style={{overflowX:'auto',marginBottom:8}}>
+            <table style={{borderCollapse:'collapse',fontSize:11,minWidth:'100%'}}>
+              <thead><tr>{preview.headers.map((h,i)=>(
+                <th key={i} style={{padding:'6px 10px',background:slot==='A'?'#4c1d95':'#164e63',color:'#fff',textAlign:'left',whiteSpace:'nowrap',fontSize:11}}>
+                  {h}{preview.numericCols[h]&&<span style={{marginLeft:4,fontSize:8,background:'rgba(255,255,255,0.25)',borderRadius:2,padding:'1px 3px'}}>num</span>}
+                </th>
+              ))}</tr></thead>
+              <tbody>{preview.rows.slice(0,6).map((row,ri)=>(
+                <tr key={ri} style={{background:ri%2===0?'#f8fafc':'#fff'}}>
+                  {row.map((cell,ci)=>(
+                    <td key={ci} style={{padding:'5px 10px',borderBottom:'1px solid #e2e8f0',color:preview.numericCols[preview.headers[ci]]?'#1e3a8a':'#475569',fontFamily:preview.numericCols[preview.headers[ci]]?'monospace':'inherit',whiteSpace:'nowrap',fontSize:11}}>{cell}</td>
+                  ))}
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+          {preview.rowCount>6&&<div style={{fontSize:10,color:'#94a3b8',marginBottom:6}}>Showing first 6 of {preview.rowCount} rows</div>}
+          <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+            {Object.keys(preview.numericCols).map(col=>{
+              const vals=preview.numericCols[col];
+              return <div key={col} style={{background:slot==='A'?'#ede9fe':'#cffafe',borderRadius:6,padding:'6px 10px',fontSize:11,border:`1px solid ${slot==='A'?'#ddd6fe':'#a5f3fc'}`}}>
+                <div style={{fontWeight:700,color:slot==='A'?'#5b21b6':'#0e7490'}}>{col}</div>
+                <div style={{color:'#475569'}}>n={vals.length} | x̄={mean(vals).toFixed(1)}</div>
+              </div>;
+            })}
+          </div>
+        </>
+      )}
+    </Card>
+  );
 
   return (
     <div>
-      {/* Upload Zone */}
-      <Card title="📂 Upload CSV File" accent="#8b5cf6">
-        <p style={{fontSize:13,color:"#475569",margin:"0 0 14px",lineHeight:1.6}}>
-          Upload any <strong>.csv file</strong> — student grades, survey results, lab measurements, or any dataset. The app will automatically detect numeric columns and let you send them to any calculator tab.
+      <Card title="📂 Upload CSV Files" accent="#8b5cf6">
+        <p style={{fontSize:13,color:'#475569',margin:'0 0 10px',lineHeight:1.6}}>
+          Upload <strong>up to two CSV files</strong> — compare two datasets, use columns from different sources, or send data to any calculator tab. File A and File B are independent and can come from different spreadsheets.
         </p>
-
-        {/* Drop Zone */}
-        <div
-          onDragOver={e=>{e.preventDefault();setDragOver(true);}}
-          onDragLeave={()=>setDragOver(false)}
-          onDrop={handleDrop}
-          style={{
-            border: `2px dashed ${dragOver ? '#8b5cf6' : '#cbd5e1'}`,
-            borderRadius: 12,
-            padding: '32px 24px',
-            textAlign: 'center',
-            background: dragOver ? '#f5f3ff' : '#fafafa',
-            cursor: 'pointer',
-            transition: 'all .2s',
-            marginBottom: 14
-          }}
-          onClick={() => document.getElementById('csv-file-input').click()}
-        >
-          <div style={{fontSize: 36, marginBottom: 8}}>📄</div>
-          <div style={{fontWeight: 700, fontSize: 15, color: '#5b21b6', marginBottom: 4}}>
-            {dragOver ? 'Drop it here!' : 'Click to browse or drag & drop'}
-          </div>
-          <div style={{fontSize: 12, color: '#94a3b8'}}>Supports .csv and .txt files with comma, semicolon, or tab delimiters</div>
-          <input
-            id="csv-file-input"
-            type="file"
-            accept=".csv,.txt"
-            style={{display:'none'}}
-            onChange={e => processFile(e.target.files[0])}
-          />
-        </div>
-
-        {/* Sample CSV download hint */}
         <Note color="#eff6ff" border="#bfdbfe" text="#1e40af">
-          💡 <strong>New to CSV?</strong> In Excel or Google Sheets, go to <em>File → Download → Comma Separated Values (.csv)</em> to export your data. Make sure the first row contains column headers like "Score", "Age", "Height", etc.
+          💡 <strong>New to CSV?</strong> In Excel or Google Sheets, go to <em>File → Download → Comma Separated Values (.csv)</em>. Make sure the first row contains column headers like "Score", "Age", "Height".
         </Note>
-        <ErrMsg msg={err} />
       </Card>
 
-      {/* Preview Table */}
-      {preview && (
-        <Card title={`📋 Data Preview  —  ${preview.rowCount} rows × ${preview.headers.length} columns`} accent="#059669">
-          <div style={{overflowX:'auto', marginBottom:12}}>
-            <table style={{borderCollapse:'collapse', fontSize:12, minWidth:'100%'}}>
-              <thead>
-                <tr>
-                  {preview.headers.map((h,i) => (
-                    <th key={i} style={{
-                      padding:'8px 12px', background:'#1e3a8a', color:'#fff',
-                      textAlign:'left', whiteSpace:'nowrap', fontWeight:600
-                    }}>
-                      {h}
-                      {preview.numericCols[h] && (
-                        <span style={{
-                          marginLeft:5, fontSize:9, background:'rgba(255,255,255,0.25)',
-                          borderRadius:3, padding:'1px 4px'
-                        }}>numeric</span>
-                      )}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {preview.rows.slice(0, 10).map((row, ri) => (
-                  <tr key={ri} style={{background: ri%2===0?'#f8fafc':'#fff'}}>
-                    {row.map((cell, ci) => (
-                      <td key={ci} style={{
-                        padding:'7px 12px', borderBottom:'1px solid #e2e8f0',
-                        color: preview.numericCols[preview.headers[ci]] ? '#1e3a8a' : '#475569',
-                        fontFamily: preview.numericCols[preview.headers[ci]] ? 'monospace' : 'inherit',
-                        whiteSpace:'nowrap'
-                      }}>{cell}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {preview.rowCount > 10 && (
-            <div style={{fontSize:11,color:'#94a3b8',marginBottom:10}}>
-              Showing first 10 of {preview.rowCount} rows.
-            </div>
-          )}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+        <UploadZone slot="A" dragOver={dragOverA} setDragOver={setDragOverA} err={errA} preview={previewA}/>
+        <UploadZone slot="B" dragOver={dragOverB} setDragOver={setDragOverB} err={errB} preview={previewB}/>
+      </div>
 
-          {/* Column Summary */}
-          <div style={{fontWeight:700,fontSize:13,color:'#1e3a8a',marginBottom:8}}>Numeric Column Summary</div>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))',gap:8}}>
-            {numCols.map(col => {
-              const vals = preview.numericCols[col];
-              const mn = Math.min(...vals), mx = Math.max(...vals);
-              return (
-                <div key={col} style={{background:'#eff6ff',borderRadius:8,padding:'10px 12px',border:'1px solid #bfdbfe'}}>
-                  <div style={{fontWeight:700,fontSize:12,color:'#1e3a8a',marginBottom:4,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{col}</div>
-                  <div style={{fontSize:11,color:'#475569'}}>n = {vals.length}</div>
-                  <div style={{fontSize:11,color:'#475569'}}>x̄ = {mean(vals).toFixed(2)}</div>
-                  <div style={{fontSize:11,color:'#475569'}}>range: [{mn.toFixed(1)}, {mx.toFixed(1)}]</div>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-      )}
-
-      {/* Send to Tab */}
-      {preview && numCols.length > 0 && (
-        <Card title="🚀 Use Data in a Calculator Tab" accent="#f97316">
-          <p style={{fontSize:13,color:'#475569',margin:'0 0 14px',lineHeight:1.6}}>
-            Select a column and choose which calculator to send it to. The data will be copied as a comma-separated string directly into that tab's input field.
+      {hasData && (
+        <Card title="🚀 Send Data to a Calculator Tab" accent="#f97316">
+          <p style={{fontSize:13,color:'#475569',margin:'0 0 12px',lineHeight:1.6}}>
+            Choose columns from File A or File B and send them to any calculator tab. For two-column analyses (Regression, Scatter, Two-Sample T), you can mix columns from different files.
           </p>
-
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10,marginBottom:12}}>
-            <Sel
-              label="Primary Column (X / data)"
-              value={sendCol}
-              onChange={setSendCol}
-              options={numCols.map(c=>[c,c])}
-            />
-            {['scatter','regression','twosample'].some(t=>sendTarget.includes(t)) || sendTarget==='regression' || sendTarget==='scatter' ? (
-              <Sel
-                label="Second Column (Y)"
-                value={sendCol2}
-                onChange={setSendCol2}
-                options={numCols.map(c=>[c,c])}
-              />
-            ) : (
-              <Sel
-                label="Second Column (Y) — optional"
-                value={sendCol2}
-                onChange={setSendCol2}
-                options={[['','— none —'],...numCols.map(c=>[c,c])]}
-              />
-            )}
-            <Sel
-              label="Send to Tab"
-              value={sendTarget}
-              onChange={setSendTarget}
+            <div>
+              <label style={{display:'block',fontSize:12,fontWeight:600,color:'#475569',marginBottom:3}}>Primary Column (from File A)</label>
+              <select value={sendCol} onChange={e=>setSendCol(e.target.value)}
+                style={{width:'100%',padding:'8px 11px',border:'1px solid #cbd5e1',borderRadius:7,fontSize:13,outline:'none'}}>
+                {numColsA.map(c=><option key={c} value={c}>{c}</option>)}
+                {numColsA.length===0&&<option value="">— upload File A first —</option>}
+              </select>
+            </div>
+            <div>
+              <label style={{display:'block',fontSize:12,fontWeight:600,color:'#475569',marginBottom:3}}>Second Column — from:</label>
+              <div style={{display:'flex',gap:6,marginBottom:4}}>
+                {['A','B'].map(s=><button key={s} onClick={()=>setSendSrc2(s)}
+                  style={{flex:1,padding:'5px 0',borderRadius:6,border:'2px solid',borderColor:sendSrc2===s?'#f97316':'#e2e8f0',background:sendSrc2===s?'#fff7ed':'#fff',color:sendSrc2===s?'#ea580c':'#475569',fontWeight:sendSrc2===s?700:400,fontSize:12,cursor:'pointer'}}>
+                  File {s}
+                </button>)}
+              </div>
+              <select value={sendCol2} onChange={e=>setSendCol2(e.target.value)}
+                style={{width:'100%',padding:'8px 11px',border:'1px solid #cbd5e1',borderRadius:7,fontSize:13,outline:'none'}}>
+                <option value="">— none —</option>
+                {(sendSrc2==='B'?numColsB:numColsA).map(c=><option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <Sel label="Send to Tab" value={sendTarget} onChange={setSendTarget}
               options={[
                 ['descriptive','📊 Descriptive Stats'],
                 ['regression','📈 Regression'],
                 ['visualizations','🎨 Visualizations'],
                 ['hypothesis_t2','🔬 Two-Sample T-Test'],
-              ]}
-            />
+              ]}/>
           </div>
-
           <Btn onClick={sendToTab} color="#f97316">Send Data to Tab →</Btn>
-
-          {sendMsg && (
-            <div style={{marginTop:10,padding:'10px 14px',background:'#f0fdf4',border:'1px solid #86efac',borderRadius:7,fontSize:13,color:'#065f46',fontWeight:600}}>
-              {sendMsg}
-            </div>
-          )}
-
-          {/* Inline data display for manual copy */}
-          {sendCol && preview.numericCols[sendCol] && (
-            <div style={{marginTop:16}}>
-              <div style={{fontWeight:700,fontSize:12,color:'#475569',marginBottom:6}}>
-                📋 Copy this data manually if needed:
-              </div>
-              <div style={{display:'grid', gridTemplateColumns: sendCol2 && preview.numericCols[sendCol2] ? '1fr 1fr' : '1fr', gap:10}}>
-                <div>
-                  <div style={{fontSize:11,color:'#94a3b8',marginBottom:3}}>{sendCol} ({preview.numericCols[sendCol].length} values)</div>
-                  <textarea
-                    readOnly
-                    value={preview.numericCols[sendCol].join(', ')}
-                    rows={3}
-                    style={{width:'100%',padding:'8px 10px',border:'1px solid #e2e8f0',borderRadius:6,fontSize:12,fontFamily:'monospace',background:'#f8fafc',boxSizing:'border-box',resize:'vertical',color:'#1e3a8a'}}
-                    onClick={e=>e.target.select()}
-                  />
-                </div>
-                {sendCol2 && preview.numericCols[sendCol2] && (
-                  <div>
-                    <div style={{fontSize:11,color:'#94a3b8',marginBottom:3}}>{sendCol2} ({preview.numericCols[sendCol2].length} values)</div>
-                    <textarea
-                      readOnly
-                      value={preview.numericCols[sendCol2].join(', ')}
-                      rows={3}
-                      style={{width:'100%',padding:'8px 10px',border:'1px solid #e2e8f0',borderRadius:6,fontSize:12,fontFamily:'monospace',background:'#f8fafc',boxSizing:'border-box',resize:'vertical',color:'#1e3a8a'}}
-                      onClick={e=>e.target.select()}
-                    />
-                  </div>
-                )}
-              </div>
-              <div style={{fontSize:11,color:'#94a3b8',marginTop:4}}>Click a box to select all, then Ctrl+C / Cmd+C to copy.</div>
-            </div>
-          )}
+          {sendMsg&&<div style={{marginTop:10,padding:'10px 14px',background:'#f0fdf4',border:'1px solid #86efac',borderRadius:7,fontSize:13,color:'#065f46',fontWeight:600}}>{sendMsg}</div>}
         </Card>
       )}
 
-      {/* Format guide */}
       <Card title="📖 CSV Format Guide" accent="#64748b">
         <div style={{fontSize:13,color:'#475569',lineHeight:1.8}}>
           <div style={{fontWeight:700,color:'#1e3a8a',marginBottom:6}}>✅ Supported formats:</div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
             {[
-              ['Comma-separated', 'Name,Score,Age\nAlice,88,20\nBob,74,21'],
-              ['Semicolon-separated', 'Name;Score;Age\nAlice;88;20\nBob;74;21'],
-              ['Tab-separated (.txt)', 'Name\tScore\tAge\nAlice\t88\t20'],
-              ['Numbers only', 'Score\n88\n74\n95\n61\n82'],
-            ].map(([title, ex]) => (
+              ['Comma-separated','Name,Score,Age\nAlice,88,20\nBob,74,21'],
+              ['Semicolon-separated','Name;Score;Age\nAlice;88;20\nBob;74;21'],
+              ['Tab-separated (.txt)','Name\tScore\tAge\nAlice\t88\t20'],
+              ['Numbers only','Score\n88\n74\n95\n61\n82'],
+            ].map(([title,ex])=>(
               <div key={title} style={{background:'#f8fafc',borderRadius:7,padding:'10px 12px'}}>
                 <div style={{fontWeight:600,fontSize:12,color:'#1e3a8a',marginBottom:4}}>{title}</div>
                 <pre style={{margin:0,fontSize:11,color:'#475569',fontFamily:'monospace',whiteSpace:'pre-wrap'}}>{ex}</pre>
@@ -1022,7 +1126,7 @@ function CSVUploadTab({ onDataLoaded, csvData }) {
             <li>Missing header row (first row must be column names)</li>
             <li>Mixed text and numbers in the same column</li>
             <li>Extra blank rows or columns</li>
-            <li>Currency symbols like $ in numeric cells (remove before uploading)</li>
+            <li>Currency symbols like $ in numeric cells</li>
           </ul>
         </div>
       </Card>
