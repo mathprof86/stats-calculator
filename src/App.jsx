@@ -45,7 +45,8 @@ const linReg = (xs,ys) => { const n=xs.length,mx=mean(xs),my=mean(ys),num=xs.red
 // ═══════════════════════════════════════════════════════════════════════════════
 // SHARED UI COMPONENTS
 // ═══════════════════════════════════════════════════════════════════════════════
-const TABS = ["📊 Descriptive","🔬 Hypothesis","📏 Confidence","🔔 Distributions","📈 Regression","🎨 Visualizations","📂 CSV Upload"];
+const TABS     = ["📊 Descriptive","🔬 Hypothesis","📏 Confidence","🔔 Distributions","📈 Regression","🎨 Visualizations","🎲 Simulations","📉 CLT Explorer","🎯 CI Coverage","📂 CSV Upload"];
+const TABS_TEST = ["📊 Descriptive","🔬 Hypothesis","📏 Confidence","🔔 Distributions","📈 Regression","🎨 Visualizations","🎲 Simulations","📂 CSV Upload"];
 
 function Card({title,children,accent="#2563eb"}) {
   return <div style={{background:"#fff",borderRadius:10,padding:20,marginBottom:16,boxShadow:"0 1px 8px rgba(0,0,0,0.07)",borderLeft:`4px solid ${accent}`}}>{title&&<div style={{fontWeight:700,fontSize:15,marginBottom:12,color:"#1e3a8a"}}>{title}</div>}{children}</div>;
@@ -289,7 +290,10 @@ export default function StatsApp() {
           {csvData&&<div style={{fontSize:11,background:"rgba(255,255,255,0.2)",borderRadius:5,padding:"2px 8px"}}>📂 A: {csvData.rowCount} rows{csvData2?` | B: ${csvData2.rowCount} rows`:""}</div>}
         </div>
         <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-          {TABS.map((t,i)=><button key={i} onClick={()=>setTab(i)} style={{background:tab===i?"#fff":"rgba(255,255,255,0.15)",color:tab===i?testMode?"#7f1d1d":"#1e3a8a":"#fff",border:"none",borderRadius:"6px 6px 0 0",padding:"8px 13px",cursor:"pointer",fontSize:11,fontWeight:tab===i?700:400,transition:"all .15s"}}>{t}{i===6&&(csvData||csvData2)?<span style={{marginLeft:4,background:"#10b981",borderRadius:3,padding:"0 4px",fontSize:9}}>{csvData&&csvData2?"2":"1"}✓</span>:""}</button>)}
+          {(testMode?TABS_TEST:TABS).map((t,i)=>{
+            const csvIdx = testMode?7:9;
+            return <button key={i} onClick={()=>setTab(i)} style={{background:tab===i?"#fff":"rgba(255,255,255,0.15)",color:tab===i?testMode?"#7f1d1d":"#1e3a8a":"#fff",border:"none",borderRadius:"6px 6px 0 0",padding:"8px 13px",cursor:"pointer",fontSize:11,fontWeight:tab===i?700:400,transition:"all .15s"}}>{t}{i===csvIdx&&(csvData||csvData2)?<span style={{marginLeft:4,background:"#10b981",borderRadius:3,padding:"0 4px",fontSize:9}}>{csvData&&csvData2?"2":"1"}✓</span>:""}</button>;
+          })}
         </div>
       </div>
       <div style={{padding:"22px 24px",maxWidth:860,margin:"0 auto"}}>
@@ -299,7 +303,10 @@ export default function StatsApp() {
         {tab===3&&<DistributionsTab testMode={testMode}/>}
         {tab===4&&<RegressionTab initXRaw={sharedXRaw} initYRaw={sharedYRaw} testMode={testMode}/>}
         {tab===5&&<VisualizationsTab initData={sharedRaw} initData2={sharedRaw2} testMode={testMode}/>}
-        {tab===6&&<CSVUploadTab onDataLoaded={handleDataLoaded} csvData={csvData} csvData2={csvData2} onDataLoaded2={handleDataLoaded2}/>}
+        {tab===6&&<SimulationsTab testMode={testMode}/>}
+        {!testMode&&tab===7&&<CLTExplorerTab/>}
+        {!testMode&&tab===8&&<CICoverageTab/>}
+        {(testMode?tab===7:tab===9)&&<CSVUploadTab onDataLoaded={handleDataLoaded} csvData={csvData} csvData2={csvData2} onDataLoaded2={handleDataLoaded2}/>}
       </div>
     </div>
   );
@@ -1130,6 +1137,886 @@ function CSVUploadTab({ onDataLoaded, csvData, csvData2, onDataLoaded2 }) {
           </ul>
         </div>
       </Card>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TAB 8: SIMULATIONS
+// ═══════════════════════════════════════════════════════════════════════════════
+function SimulationsTab({testMode=false}) {
+  const [simType, setSimType] = useState("coin");
+
+  // ── Coin ──────────────────────────────────────────────────────────────────
+  const [coinFlips, setCoinFlips] = useState(10);
+  const [coinResults, setCoinResults] = useState(null);
+  const flipCoins = () => {
+    const results = Array.from({length:Number(coinFlips)}, () => Math.random()<0.5?"H":"T");
+    const heads = results.filter(r=>r==="H").length;
+    setCoinResults({results, heads, tails:results.length-heads, pHead:(heads/results.length)});
+  };
+
+  // ── Dice ──────────────────────────────────────────────────────────────────
+  const [numDice, setNumDice] = useState(2);
+  const [numSides, setNumSides] = useState(6);
+  const [numRolls, setNumRolls] = useState(20);
+  const [diceResults, setDiceResults] = useState(null);
+  const rollDice = () => {
+    const nd=Number(numDice), ns=Number(numSides), nr=Number(numRolls);
+    const rolls = Array.from({length:nr}, () => {
+      const dice = Array.from({length:nd}, () => Math.floor(Math.random()*ns)+1);
+      return {dice, sum:dice.reduce((a,b)=>a+b,0)};
+    });
+    const sums = rolls.map(r=>r.sum);
+    const freq = {};
+    sums.forEach(s=>{ freq[s]=(freq[s]||0)+1; });
+    setDiceResults({rolls, sums, freq, mn:Math.min(...sums), mx:Math.max(...sums), avg:(sums.reduce((a,b)=>a+b,0)/sums.length)});
+  };
+
+  // ── Cards ─────────────────────────────────────────────────────────────────
+  const [numCards, setNumCards] = useState(5);
+  const [withReplace, setWithReplace] = useState(false);
+  const [cardResults, setCardResults] = useState(null);
+  const SUITS = ["♠","♥","♦","♣"];
+  const RANKS = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
+  const SUIT_COLOR = {"♠":"#1e293b","♥":"#dc2626","♦":"#dc2626","♣":"#1e293b"};
+  const drawCards = () => {
+    const deck = SUITS.flatMap(s=>RANKS.map(r=>({rank:r,suit:s})));
+    const drawn = [];
+    const used = new Set();
+    const n = Math.min(Number(numCards), withReplace ? Number(numCards) : 52);
+    for(let i=0;i<n;i++){
+      if(withReplace){
+        drawn.push(deck[Math.floor(Math.random()*52)]);
+      } else {
+        let idx;
+        do { idx=Math.floor(Math.random()*52); } while(used.has(idx));
+        used.add(idx);
+        drawn.push(deck[idx]);
+      }
+    }
+    const suits = {};
+    const ranks = {};
+    drawn.forEach(c=>{ suits[c.suit]=(suits[c.suit]||0)+1; ranks[c.rank]=(ranks[c.rank]||0)+1; });
+    const faceCards = drawn.filter(c=>["J","Q","K","A"].includes(c.rank)).length;
+    const redCards = drawn.filter(c=>["♥","♦"].includes(c.suit)).length;
+    setCardResults({drawn, suits, ranks, faceCards, redCards});
+  };
+
+  // ── Spinner ───────────────────────────────────────────────────────────────
+  const [sectors, setSectors] = useState([
+    {label:"Red",   weight:25, color:"#ef4444"},
+    {label:"Blue",  weight:25, color:"#3b82f6"},
+    {label:"Green", weight:25, color:"#22c55e"},
+    {label:"Yellow",weight:25, color:"#eab308"},
+  ]);
+  const [spinCount, setSpinCount] = useState(20);
+  const [spinResults, setSpinResults] = useState(null);
+  const [spinning, setSpinning] = useState(false);
+  const [spinAngle, setSpinAngle] = useState(0);
+
+  const totalWeight = sectors.reduce((a,s)=>a+s.weight,0);
+  const addSector = () => setSectors(s=>[...s,{label:`Sector ${s.length+1}`,weight:10,color:"#8b5cf6"}]);
+  const removeSector = (i) => setSectors(s=>s.filter((_,j)=>j!==i));
+  const updateSector = (i,field,val) => setSectors(s=>s.map((sec,j)=>j===i?{...sec,[field]:field==="weight"?Math.max(1,Number(val)):val}:sec));
+
+  const runSpin = () => {
+    const n = Number(spinCount);
+    const results = Array.from({length:n}, () => {
+      let r=Math.random()*totalWeight, cum=0;
+      for(const sec of sectors){ cum+=sec.weight; if(r<cum) return sec.label; }
+      return sectors[sectors.length-1].label;
+    });
+    const freq = {};
+    results.forEach(r=>{ freq[r]=(freq[r]||0)+1; });
+    setSpinResults({results, freq});
+    // Animate spinner
+    setSpinning(true);
+    const targetAngle = spinAngle + 720 + Math.random()*360;
+    setSpinAngle(targetAngle);
+    setTimeout(()=>setSpinning(false), 1500);
+  };
+
+  // Build spinner SVG arcs
+  const buildSpinnerPath = (startDeg, endDeg, cx, cy, r) => {
+    const toRad = d => d*Math.PI/180;
+    const x1=cx+r*Math.cos(toRad(startDeg)), y1=cy+r*Math.sin(toRad(startDeg));
+    const x2=cx+r*Math.cos(toRad(endDeg)),   y2=cy+r*Math.sin(toRad(endDeg));
+    const large = endDeg-startDeg>180?1:0;
+    return `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`;
+  };
+
+  const SIM_TYPES = [
+    {key:"coin",  label:"🪙 Coin Flip"},
+    {key:"dice",  label:"🎲 Dice Roll"},
+    {key:"cards", label:"🃏 Card Draw"},
+    {key:"spinner",label:"🎡 Spinner"},
+  ];
+
+  const sectionBg = {coin:"#eff6ff", dice:"#fef3c7", cards:"#fdf4ff", spinner:"#f0fdf4"};
+  const sectionAccent = {coin:"#2563eb", dice:"#d97706", cards:"#7c3aed", spinner:"#059669"};
+
+  return (
+    <div>
+      <Card title="🎲 Probability Simulations" accent="#1e3a8a">
+        {!testMode&&<p style={{fontSize:13,color:"#475569",margin:"0 0 14px",lineHeight:1.6}}>
+          Run probability experiments and observe outcomes. Compare your simulated results to theoretical probabilities — the more trials you run, the closer the results should get to the true probability (Law of Large Numbers).
+        </p>}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {SIM_TYPES.map(({key,label})=>(
+            <button key={key} onClick={()=>setSimType(key)}
+              style={{padding:"9px 18px",borderRadius:8,border:"2px solid",borderColor:simType===key?sectionAccent[key]:"#e2e8f0",
+                background:simType===key?sectionAccent[key]:"#fff",color:simType===key?"#fff":"#475569",
+                fontWeight:700,fontSize:13,cursor:"pointer",transition:"all .15s"}}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </Card>
+
+      {/* ── COIN ── */}
+      {simType==="coin"&&(
+        <div>
+          <Card title="🪙 Coin Flip Simulation" accent="#2563eb">
+          {!testMode&&<p style={{fontSize:13,color:"#475569",margin:"0 0 14px",lineHeight:1.6}}>
+              Flip a fair coin multiple times. Theoretical probability: P(Heads) = 0.5, P(Tails) = 0.5.
+            </p>}
+            <div style={{display:"flex",alignItems:"flex-end",gap:12,flexWrap:"wrap"}}>
+              <NumInput label="Number of flips" value={coinFlips} onChange={setCoinFlips} min={1} max={500} width={110}/>
+              <button onClick={flipCoins} style={{background:"#2563eb",color:"#fff",border:"none",borderRadius:8,padding:"10px 24px",fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:10}}>
+                🪙 Flip!
+              </button>
+            </div>
+            {coinResults&&(
+              <div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:14}}>
+                  {[
+                    ["Heads",coinResults.heads,"#2563eb"],
+                    ["Tails",coinResults.tails,"#64748b"],
+                    ["P̂(Heads)",coinResults.pHead.toFixed(3),"#059669"],
+                  ].map(([l,v,c])=>(
+                    <div key={l} style={{background:"#f8fafc",borderRadius:8,padding:"12px",textAlign:"center",border:`2px solid ${c}20`}}>
+                      <div style={{fontSize:22,fontWeight:800,color:c}}>{v}</div>
+                      <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{l}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* Coin display — show up to 100 */}
+                <div style={{background:"#f8fafc",borderRadius:8,padding:"12px",marginBottom:10}}>
+                  <div style={{fontSize:11,fontWeight:600,color:"#64748b",marginBottom:6}}>
+                    Results {coinResults.results.length>100?"(first 100 shown)":""}:
+                  </div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                    {coinResults.results.slice(0,100).map((r,i)=>(
+                      <div key={i} style={{width:28,height:28,borderRadius:"50%",background:r==="H"?"#2563eb":"#94a3b8",color:"#fff",fontSize:10,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                        {r}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                {/* Bar chart */}
+                <div style={{display:"flex",gap:8,alignItems:"flex-end",height:80,marginBottom:4}}>
+                  {[["H","Heads","#2563eb",coinResults.heads],["T","Tails","#94a3b8",coinResults.tails]].map(([k,label,color,count])=>{
+                    const pct = count/coinResults.results.length;
+                    return (
+                      <div key={k} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+                        <div style={{fontSize:11,fontWeight:700,color}}>{(pct*100).toFixed(1)}%</div>
+                        <div style={{width:"100%",background:color,borderRadius:"4px 4px 0 0",height:Math.max(4,pct*60)+"px",transition:"height .4s"}}/>
+                        <div style={{fontSize:11,color:"#64748b"}}>{label}</div>
+                      </div>
+                    );
+                  })}
+                  <div style={{width:2,height:60,background:"#fde68a",borderRadius:2,position:"relative"}}>
+                    <div style={{position:"absolute",top:0,left:4,fontSize:9,color:"#92400e",whiteSpace:"nowrap"}}>50% theory</div>
+                  </div>
+                </div>
+                {!testMode&&<Note>💡 Theoretical: 50% Heads, 50% Tails. Your simulation: {(coinResults.pHead*100).toFixed(1)}% Heads. Try running more flips — the result gets closer to 50% as n increases (Law of Large Numbers).</Note>}
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {/* ── DICE ── */}
+      {simType==="dice"&&(
+        <Card title="🎲 Dice Roll Simulation" accent="#d97706">
+          {!testMode&&<p style={{fontSize:13,color:"#475569",margin:"0 0 14px",lineHeight:1.6}}>
+            Roll one or more dice and observe the distribution of sums. Notice how the distribution of sums becomes bell-shaped as you add more dice — an early glimpse of the Central Limit Theorem.
+          </p>}
+          <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"}}>
+            <NumInput label="Number of dice" value={numDice} onChange={setNumDice} min={1} max={6} width={100}/>
+            <NumInput label="Sides per die" value={numSides} onChange={setNumSides} min={2} max={20} width={100}/>
+            <NumInput label="Number of rolls" value={numRolls} onChange={setNumRolls} min={1} max={200} width={110}/>
+            <button onClick={rollDice} style={{background:"#d97706",color:"#fff",border:"none",borderRadius:8,padding:"10px 24px",fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:10}}>
+              🎲 Roll!
+            </button>
+          </div>
+          {diceResults&&(
+            <div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
+                {[
+                  ["Min Sum",diceResults.mn,"#d97706"],
+                  ["Max Sum",diceResults.mx,"#d97706"],
+                  ["Mean Sum",diceResults.avg.toFixed(2),"#059669"],
+                ].map(([l,v,c])=>(
+                  <div key={l} style={{background:"#fefce8",borderRadius:8,padding:"10px",textAlign:"center"}}>
+                    <div style={{fontSize:20,fontWeight:800,color:c}}>{v}</div>
+                    <div style={{fontSize:11,color:"#64748b"}}>{l}</div>
+                  </div>
+                ))}
+              </div>
+              {/* Frequency histogram */}
+              <div style={{marginBottom:14}}>
+                <div style={{fontSize:12,fontWeight:600,color:"#64748b",marginBottom:8}}>Distribution of Sums:</div>
+                <div style={{display:"flex",alignItems:"flex-end",gap:3,height:100,paddingBottom:20,position:"relative"}}>
+                  {Object.keys(diceResults.freq).map(Number).sort((a,b)=>a-b).map(k=>{
+                    const maxFreq=Math.max(...Object.values(diceResults.freq));
+                    const h=(diceResults.freq[k]/maxFreq)*80;
+                    return (
+                      <div key={k} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",height:"100%"}}>
+                        <div style={{fontSize:9,color:"#d97706",fontWeight:700,marginBottom:2}}>{diceResults.freq[k]}</div>
+                        <div style={{width:"100%",background:"#fbbf24",borderRadius:"3px 3px 0 0",height:h+"px",minHeight:2,transition:"height .3s"}}/>
+                        <div style={{fontSize:8,color:"#64748b",marginTop:2}}>{k}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              {/* Last 10 rolls detail */}
+              <div style={{fontSize:12,fontWeight:600,color:"#64748b",marginBottom:6}}>Last {Math.min(10,diceResults.rolls.length)} rolls:</div>
+              <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                {diceResults.rolls.slice(-10).reverse().map((roll,i)=>(
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:8,background:"#fefce8",borderRadius:6,padding:"6px 10px"}}>
+                    <div style={{display:"flex",gap:4}}>
+                      {roll.dice.map((d,j)=>(
+                        <div key={j} style={{width:26,height:26,borderRadius:5,background:"#d97706",color:"#fff",fontSize:12,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"1px 1px 3px rgba(0,0,0,0.2)"}}>
+                          {d}
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{fontSize:12,color:"#475569"}}>Sum = <strong style={{color:"#d97706"}}>{roll.sum}</strong></div>
+                  </div>
+                ))}
+              </div>
+              {!testMode&&<Note color="#fef3c7" border="#fde68a" text="#713f12">
+                💡 Theoretical mean sum = {((Number(numSides)+1)/2*Number(numDice)).toFixed(2)} ({numDice} dice × (1+{numSides})/2). Your simulated mean = {diceResults.avg.toFixed(2)}.
+              </Note>}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* ── CARDS ── */}
+      {simType==="cards"&&(
+        <Card title="🃏 Card Drawing Simulation" accent="#7c3aed">
+          {!testMode&&<p style={{fontSize:13,color:"#475569",margin:"0 0 14px",lineHeight:1.6}}>
+            Draw cards from a standard 52-card deck. Compare with and without replacement.
+          </p>}
+          <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"}}>
+            <NumInput label="Cards to draw" value={numCards} onChange={setNumCards} min={1} max={withReplace?52:52} width={100}/>
+            <div style={{marginBottom:10}}>
+              <label style={{display:"block",fontSize:12,fontWeight:600,color:"#475569",marginBottom:3}}>Replacement</label>
+              <div style={{display:"flex",gap:6}}>
+                {[[false,"Without"],[true,"With"]].map(([val,lbl])=>(
+                  <button key={lbl} onClick={()=>setWithReplace(val)}
+                    style={{padding:"7px 14px",borderRadius:7,border:"2px solid",borderColor:withReplace===val?"#7c3aed":"#e2e8f0",
+                      background:withReplace===val?"#7c3aed":"#fff",color:withReplace===val?"#fff":"#475569",
+                      fontWeight:600,fontSize:12,cursor:"pointer"}}>
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <button onClick={drawCards} style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:8,padding:"10px 24px",fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:10}}>
+              🃏 Draw!
+            </button>
+          </div>
+          {cardResults&&(
+            <div>
+              {/* Cards display */}
+              <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:16}}>
+                {cardResults.drawn.map((card,i)=>(
+                  <div key={i} style={{width:44,height:62,borderRadius:6,background:"#fff",border:"1.5px solid #e2e8f0",boxShadow:"1px 2px 5px rgba(0,0,0,0.1)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:SUIT_COLOR[card.suit]}}>
+                    <div style={{fontSize:14}}>{card.rank}</div>
+                    <div style={{fontSize:18,lineHeight:1}}>{card.suit}</div>
+                  </div>
+                ))}
+              </div>
+              {/* Summary stats */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:12}}>
+                <div style={{background:"#faf5ff",borderRadius:8,padding:"10px 14px"}}>
+                  <div style={{fontSize:11,fontWeight:600,color:"#7c3aed",marginBottom:6}}>BY SUIT</div>
+                  {SUITS.map(s=>(
+                    <div key={s} style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:2}}>
+                      <span style={{color:SUIT_COLOR[s],fontWeight:700}}>{s}</span>
+                      <span>{cardResults.suits[s]||0} ({(((cardResults.suits[s]||0)/cardResults.drawn.length)*100).toFixed(0)}%)</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{background:"#faf5ff",borderRadius:8,padding:"10px 14px"}}>
+                  <div style={{fontSize:11,fontWeight:600,color:"#7c3aed",marginBottom:6}}>HIGHLIGHTS</div>
+                  {[
+                    ["Face cards (J,Q,K,A)",cardResults.faceCards, (cardResults.faceCards/cardResults.drawn.length*100).toFixed(0)+"%","≈31%"],
+                    ["Red cards (♥,♦)",cardResults.redCards,(cardResults.redCards/cardResults.drawn.length*100).toFixed(0)+"%","50%"],
+                  ].map(([l,n,pct,theory])=>(
+                    <div key={l} style={{marginBottom:6}}>
+                      <div style={{fontSize:11,color:"#475569"}}>{l}</div>
+                      <div style={{fontSize:13,fontWeight:700,color:"#7c3aed"}}>{n} ({pct}) <span style={{fontSize:10,color:"#94a3b8",fontWeight:400}}>theory: {theory}</span></div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {!testMode&&<Note color="#faf5ff" border="#e9d5ff" text="#581c87">
+                💡 Drawing {withReplace?"WITH":"WITHOUT"} replacement. {withReplace?"Each draw is independent — same card can appear again.":"Cards drawn cannot be drawn again — dependent events."}
+                {" "}Theoretical P(Ace) = 4/52 ≈ 0.077. Theoretical P(Heart) = 13/52 = 0.25.
+              </Note>}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* ── SPINNER ── */}
+      {simType==="spinner"&&(
+        <Card title="🎡 Customizable Spinner" accent="#059669">
+          {!testMode&&<p style={{fontSize:13,color:"#475569",margin:"0 0 14px",lineHeight:1.6}}>
+            Design your own spinner by adjusting sector sizes. Run spins and compare observed frequencies to the theoretical probabilities.
+          </p>}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
+            {/* Left — controls */}
+            <div>
+              <div style={{fontSize:12,fontWeight:600,color:"#475569",marginBottom:8}}>Spinner Sectors (weights determine size):</div>
+              {sectors.map((sec,i)=>(
+                <div key={i} style={{display:"flex",gap:6,alignItems:"center",marginBottom:6,background:"#f8fafc",borderRadius:7,padding:"6px 8px"}}>
+                  <input type="color" value={sec.color} onChange={e=>updateSector(i,"color",e.target.value)}
+                    style={{width:28,height:28,borderRadius:4,border:"none",cursor:"pointer",padding:0}}/>
+                  <input value={sec.label} onChange={e=>updateSector(i,"label",e.target.value)}
+                    style={{flex:1,padding:"5px 8px",border:"1px solid #e2e8f0",borderRadius:6,fontSize:12,outline:"none"}}/>
+                  <input type="number" value={sec.weight} min={1} max={100} onChange={e=>updateSector(i,"weight",e.target.value)}
+                    style={{width:52,padding:"5px 6px",border:"1px solid #e2e8f0",borderRadius:6,fontSize:12,textAlign:"center",outline:"none"}}/>
+                  <button onClick={()=>removeSector(i)} style={{background:"#fef2f2",border:"1px solid #fecaca",color:"#dc2626",borderRadius:5,padding:"4px 8px",fontSize:11,cursor:"pointer",fontWeight:700}}>✕</button>
+                </div>
+              ))}
+              <button onClick={addSector} style={{background:"#f0fdf4",border:"1px dashed #86efac",color:"#059669",borderRadius:7,padding:"7px 14px",fontSize:12,cursor:"pointer",fontWeight:600,marginBottom:12,width:"100%"}}>
+                + Add Sector
+              </button>
+              <NumInput label="Number of spins" value={spinCount} onChange={setSpinCount} min={1} max={1000} width={120}/>
+              <button onClick={runSpin} disabled={spinning}
+                style={{background:spinning?"#94a3b8":"#059669",color:"#fff",border:"none",borderRadius:8,padding:"11px 28px",fontSize:14,fontWeight:700,cursor:spinning?"not-allowed":"pointer",width:"100%",transition:"background .2s"}}>
+                {spinning?"⏳ Spinning…":"🎡 Spin!"}
+              </button>
+            </div>
+            {/* Right — spinner visual */}
+            <div style={{display:"flex",flexDirection:"column",alignItems:"center"}}>
+              <div style={{position:"relative",marginBottom:8}}>
+                <svg width={160} height={160} style={{transform:`rotate(${spinAngle}deg)`,transition:spinning?"transform 1.5s cubic-bezier(0.17,0.67,0.21,0.99)":"none"}}>
+                  {sectors.length>0&&(()=>{
+                    let cumDeg=0;
+                    return sectors.map((sec,i)=>{
+                      const sweepDeg=(sec.weight/totalWeight)*360;
+                      const startDeg=cumDeg-90;
+                      const endDeg=startDeg+sweepDeg;
+                      cumDeg+=sweepDeg;
+                      const midDeg=(startDeg+endDeg)/2;
+                      const lx=80+45*Math.cos(midDeg*Math.PI/180);
+                      const ly=80+45*Math.sin(midDeg*Math.PI/180);
+                      return (
+                        <g key={i}>
+                          <path d={buildSpinnerPath(startDeg,endDeg,80,80,75)} fill={sec.color} stroke="#fff" strokeWidth={2}/>
+                          {sweepDeg>20&&<text x={lx} y={ly} fontSize={9} fill="#fff" textAnchor="middle" dominantBaseline="middle" fontWeight="700"
+                            style={{textShadow:"0 0 3px rgba(0,0,0,0.5)"}}>{sec.label}</text>}
+                        </g>
+                      );
+                    });
+                  })()}
+                  <circle cx={80} cy={80} r={6} fill="#1e293b"/>
+                </svg>
+                {/* Pointer */}
+                <div style={{position:"absolute",top:-8,left:"50%",transform:"translateX(-50%)",width:0,height:0,borderLeft:"8px solid transparent",borderRight:"8px solid transparent",borderTop:"20px solid #1e293b"}}/>
+              </div>
+              {/* Theoretical probabilities */}
+              <div style={{width:"100%"}}>
+                <div style={{fontSize:11,fontWeight:600,color:"#475569",marginBottom:4}}>Theoretical Probabilities:</div>
+                {sectors.map((sec,i)=>(
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                    <div style={{width:10,height:10,borderRadius:2,background:sec.color,flexShrink:0}}/>
+                    <div style={{fontSize:11,color:"#475569",flex:1}}>{sec.label}</div>
+                    <div style={{fontSize:11,fontWeight:700,color:"#1e3a8a"}}>{((sec.weight/totalWeight)*100).toFixed(1)}%</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          {/* Results */}
+          {spinResults&&(
+            <div style={{marginTop:16}}>
+              <div style={{fontSize:13,fontWeight:600,color:"#475569",marginBottom:8}}>Results after {spinResults.results.length} spins:</div>
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {sectors.map(sec=>{
+                  const count = spinResults.freq[sec.label]||0;
+                  const pct = count/spinResults.results.length;
+                  const theory = sec.weight/totalWeight;
+                  return (
+                    <div key={sec.label} style={{display:"flex",alignItems:"center",gap:10}}>
+                      <div style={{width:12,height:12,borderRadius:2,background:sec.color,flexShrink:0}}/>
+                      <div style={{fontSize:12,width:70,color:"#475569"}}>{sec.label}</div>
+                      <div style={{flex:1,background:"#f1f5f9",borderRadius:4,height:16,overflow:"hidden"}}>
+                        <div style={{width:(pct*100)+"%",height:"100%",background:sec.color,borderRadius:4,transition:"width .5s",minWidth:2}}/>
+                      </div>
+                      <div style={{fontSize:11,fontWeight:700,width:60,color:"#1e3a8a"}}>{count} ({(pct*100).toFixed(1)}%)</div>
+                      <div style={{fontSize:10,color:"#94a3b8",width:52}}>≈{(theory*100).toFixed(1)}%</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TAB 9: CLT EXPLORER
+// ═══════════════════════════════════════════════════════════════════════════════
+function CLTExplorerTab() {
+  const [popShape, setPopShape] = useState("right");
+  const [statType, setStatType] = useState("mean");
+  const [sampleSize, setSampleSize] = useState(30);
+  const [sampleStats, setSampleStats] = useState([]);
+  const [running, setRunning] = useState(false);
+  const intervalRef = useRef(null);
+
+  // Keep latest settings in a ref so interval callback is never stale
+  const settingsRef = useRef({popShape, statType, sampleSize});
+  settingsRef.current = {popShape, statType, sampleSize};
+
+  const drawFromPop = (shape) => {
+    switch(shape) {
+      case "right": { const u=Math.random(); return -Math.log(1-u)*2+1; }
+      case "left":  { const u=Math.random(); return 10-(-Math.log(1-u)*2+1); }
+      case "normal":{ const u1=Math.random(),u2=Math.random(); return Math.sqrt(-2*Math.log(u1))*Math.cos(2*Math.PI*u2)*2+5; }
+      case "uniform": return Math.random()*10;
+      case "bimodal": return Math.random()<0.5
+        ? (Math.random()+Math.random()+Math.random())*1.2+1
+        : (Math.random()+Math.random()+Math.random())*1.2+6;
+      default: return Math.random()*10;
+    }
+  };
+
+  const makeStat = (shape, stat, n) => {
+    const sample = Array.from({length:n}, ()=>drawFromPop(shape));
+    if(stat==="mean") return sample.reduce((a,b)=>a+b,0)/n;
+    return sample.filter(x=>x>5).length/n;
+  };
+
+  const addSamples = (k) => {
+    const {popShape:ps, statType:st, sampleSize:n} = settingsRef.current;
+    const newStats = Array.from({length:k}, ()=>makeStat(ps, st, Number(n)));
+    setSampleStats(prev=>[...prev, ...newStats]);
+  };
+
+  const stopStream = () => { setRunning(false); clearInterval(intervalRef.current); };
+
+  const startStream = () => {
+    setRunning(true);
+    intervalRef.current = setInterval(()=>{
+      setSampleStats(prev=>{
+        if(prev.length>=2000){ stopStream(); return prev; }
+        const {popShape:ps,statType:st,sampleSize:n} = settingsRef.current;
+        return [...prev, makeStat(ps, st, Number(n))];
+      });
+    }, 80);
+  };
+
+  const reset = () => { stopStream(); setSampleStats([]); };
+
+  // Population preview SVG
+  const popPts = Array.from({length:200}, (_,i)=>{
+    const x=i/199*10;
+    switch(popShape){
+      case "right":  return {x, y: x<0.01?0:Math.exp(-x/2)*1.5};
+      case "left":   return {x, y: (10-x)<0.01?0:Math.exp(-(10-x)/2)*1.5};
+      case "normal": { const z=(x-5)/2; return {x, y:Math.exp(-z*z/2)/Math.sqrt(2*Math.PI)*4}; }
+      case "uniform": return {x, y:0.15};
+      case "bimodal": {
+        const z1=(x-2.5)/0.8, z2=(x-7.5)/0.8;
+        return {x, y:(Math.exp(-z1*z1/2)+Math.exp(-z2*z2/2))*0.4};
+      }
+      default: return {x,y:0};
+    }
+  });
+  const popMaxY = Math.max(...popPts.map(p=>p.y),0.01);
+  const popW=300, popH=80;
+  const spx=x=>(x/10)*(popW-20)+10;
+  const spy=y=>popH-4-(y/popMaxY)*(popH-10);
+  const popPath="M"+popPts.map(p=>`${spx(p.x).toFixed(1)},${spy(p.y).toFixed(1)}`).join("L");
+
+  // Sampling distribution histogram
+  const buildHist = (data, bins=20) => {
+    if(data.length<2) return [];
+    const mn=Math.min(...data), mx=Math.max(...data);
+    const bw=(mx-mn)/bins||1;
+    const counts=Array(bins).fill(0);
+    data.forEach(v=>{ const i=Math.min(Math.floor((v-mn)/bw),bins-1); counts[i]++; });
+    return counts.map((c,i)=>({lo:mn+i*bw, hi:mn+(i+1)*bw, count:c, freq:c/data.length}));
+  };
+
+  const numSamples = sampleStats.length;
+  const hist = numSamples>1 ? buildHist(sampleStats) : [];
+  const histMax = hist.length ? Math.max(...hist.map(b=>b.freq)) : 1;
+  const sampMean = numSamples ? sampleStats.reduce((a,b)=>a+b,0)/numSamples : 0;
+  const sampSD = numSamples>1 ? Math.sqrt(sampleStats.reduce((a,b)=>a+(b-sampMean)**2,0)/(numSamples-1)) : 0;
+
+  const POP_SHAPES=[["right","Right Skewed"],["normal","Normal"],["left","Left Skewed"],["uniform","Uniform"],["bimodal","Bimodal"]];
+
+  // True population parameters for each distribution
+  const POP_PARAMS = {
+    right:   {mu:3,      sigma:2,      p:0.1353},
+    left:    {mu:7,      sigma:2,      p:0.8647},
+    normal:  {mu:5,      sigma:2,      p:0.5},
+    uniform: {mu:5,      sigma:2.8868, p:0.5},
+    bimodal: {mu:5.3,    sigma:2.571,  p:0.5},
+  };
+  const popParams = POP_PARAMS[popShape];
+  const trueParam  = statType==="mean" ? popParams.mu    : popParams.p;
+  const trueSigma  = statType==="mean" ? popParams.sigma : Math.sqrt(popParams.p*(1-popParams.p));
+  const theoreticalSE = trueSigma / Math.sqrt(Number(sampleSize));
+
+  return (
+    <div>
+      <Card title="📉 Central Limit Theorem Explorer" accent="#1e3a8a">
+        <p style={{fontSize:13,color:"#475569",margin:"0 0 6px",lineHeight:1.6}}>
+          The <strong>Central Limit Theorem (CLT)</strong> states that the sampling distribution of the sample mean (or proportion) approaches a <strong>normal distribution</strong> as the sample size increases — regardless of the shape of the population. Watch it happen in real time.
+        </p>
+      </Card>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
+        {/* Controls */}
+        <Card title="⚙️ Settings" accent="#7c3aed">
+          <Sel label="Population Shape" value={popShape} onChange={v=>{setPopShape(v);reset();}}
+            options={POP_SHAPES.map(([v,l])=>[v,l])}/>
+          <Sel label="Sample Statistic" value={statType} onChange={v=>{setStatType(v);reset();}}
+            options={[["mean","Sample Mean (x̄)"],["prop","Sample Proportion (p̂)"]]}/>
+          <NumInput label="Sample Size (n)" value={sampleSize} onChange={v=>{setSampleSize(v);reset();}} min={2} max={500} width={120}/>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8}}>
+            <button onClick={()=>addSamples(1)}   style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:7,padding:"9px 16px",fontSize:12,fontWeight:700,cursor:"pointer"}}>+ 1 Sample</button>
+            <button onClick={()=>addSamples(10)}  style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:7,padding:"9px 16px",fontSize:12,fontWeight:700,cursor:"pointer"}}>+ 10</button>
+            <button onClick={()=>addSamples(100)} style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:7,padding:"9px 16px",fontSize:12,fontWeight:700,cursor:"pointer"}}>+ 100</button>
+            <button onClick={running?stopStream:startStream}
+              style={{background:running?"#dc2626":"#059669",color:"#fff",border:"none",borderRadius:7,padding:"9px 16px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+              {running?"⏹ Stop":"▶ Stream"}
+            </button>
+            <button onClick={reset} style={{background:"#f1f5f9",color:"#475569",border:"1px solid #e2e8f0",borderRadius:7,padding:"9px 16px",fontSize:12,fontWeight:700,cursor:"pointer"}}>↺ Reset</button>
+          </div>
+        </Card>
+
+        {/* Population preview */}
+        <Card title="Population Distribution" accent="#d97706">
+          <div style={{fontSize:12,color:"#64748b",marginBottom:8}}>
+            Shape: <strong style={{color:"#d97706"}}>{POP_SHAPES.find(([v])=>v===popShape)?.[1]}</strong>
+            {statType==="prop"&&<span style={{color:"#475569"}}> — P(X {">"} 5) is being estimated</span>}
+          </div>
+          <svg width={popW} height={popH} style={{display:"block",maxWidth:"100%"}}>
+            <line x1={10} y1={popH-4} x2={popW-10} y2={popH-4} stroke="#94a3b8" strokeWidth={1}/>
+            <path d={popPath} fill="#dbeafe" stroke="#2563eb" strokeWidth={2}/>
+          </svg>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:"#94a3b8",padding:"0 10px",marginBottom:10}}>
+            <span>Low</span><span>← values →</span><span>High</span>
+          </div>
+          {/* Population parameters */}
+          <div style={{borderTop:"1px solid #f1f5f9",paddingTop:10}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#64748b",marginBottom:6,textTransform:"uppercase",letterSpacing:.5}}>True Population Parameters</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+              {(statType==="mean"
+                ? [["μ (mean)", popParams.mu.toFixed(4)],["σ (std dev)", popParams.sigma.toFixed(4)]]
+                : [["p (proportion)", popParams.p.toFixed(4)],["√(p(1-p))", trueSigma.toFixed(4)]]
+              ).map(([l,v])=>(
+                <div key={l} style={{background:"#fff7ed",borderRadius:6,padding:"7px 6px",textAlign:"center"}}>
+                  <div style={{fontSize:13,fontWeight:800,color:"#d97706"}}>{v}</div>
+                  <div style={{fontSize:9,color:"#64748b",marginTop:1,lineHeight:1.3}}>{l}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      {/* Sampling Distribution */}
+      <Card title={`Sampling Distribution of the ${statType==="mean"?"Sample Mean (x̄)":"Sample Proportion (p̂)"} — ${numSamples} samples taken`} accent="#059669">
+        {numSamples<2?(
+          <div style={{textAlign:"center",padding:"32px 0",color:"#94a3b8",fontSize:13}}>
+            Click "+ 1 Sample", "+ 10", "+ 100", or "▶ Stream" to start sampling from the population above.
+          </div>
+        ):(
+          <div>
+            {/* Comparison table */}
+            <div style={{marginBottom:16}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:6}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#64748b",paddingBottom:4}}/>
+                <div style={{fontSize:11,fontWeight:700,color:"#d97706",textAlign:"center",paddingBottom:4,borderBottom:"2px solid #fde68a"}}>Population (true)</div>
+                <div style={{fontSize:11,fontWeight:700,color:"#059669",textAlign:"center",paddingBottom:4,borderBottom:"2px solid #86efac"}}>Sampling Distribution</div>
+              </div>
+              {[
+                [statType==="mean"?"Mean  (μ vs. mean of x̄'s)":"Proportion  (p vs. mean of p̂'s)", trueParam.toFixed(4), sampMean.toFixed(4)],
+                [statType==="mean"?"Std Dev  (σ vs. SD of x̄'s)":"Std Dev  (√(p(1-p)) vs. SD of p̂'s)", trueSigma.toFixed(4), sampSD.toFixed(4)],
+                ["Standard Error  (σ/√n  =  theoretical SE)", theoreticalSE.toFixed(4), sampSD.toFixed(4)],
+                ["Samples (k)  /  Sample size (n)", "—", `${numSamples} / ${sampleSize}`],
+              ].map(([label,pop,samp])=>(
+                <div key={label} style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,padding:"6px 0",borderBottom:"1px solid #f1f5f9",alignItems:"center"}}>
+                  <div style={{fontSize:11,color:"#475569"}}>{label}</div>
+                  <div style={{textAlign:"center",fontWeight:800,fontSize:14,color:"#d97706",fontFamily:"monospace"}}>{pop}</div>
+                  <div style={{textAlign:"center",fontWeight:800,fontSize:14,color:"#059669",fontFamily:"monospace"}}>{samp}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Histogram */}
+            <div style={{position:"relative",height:160,background:"#f8fafc",borderRadius:8,padding:"12px 12px 30px",marginBottom:12}}>
+              <div style={{display:"flex",alignItems:"flex-end",height:"100%",gap:1}}>
+                {hist.map((bin,i)=>{
+                  const h=(bin.freq/histMax)*100;
+                  return (
+                    <div key={i} title={`${bin.lo.toFixed(2)}–${bin.hi.toFixed(2)}: ${bin.count}`}
+                      style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",height:"100%"}}>
+                      <div style={{width:"100%",background:"#10b981",borderRadius:"2px 2px 0 0",height:h+"%",minHeight:1,transition:"height .15s",opacity:.85}}/>
+                    </div>
+                  );
+                })}
+              </div>
+              {numSamples>=30&&(
+                <div style={{position:"absolute",top:8,right:12,fontSize:10,color:"#059669",fontWeight:600,background:"rgba(240,253,244,0.9)",padding:"2px 6px",borderRadius:4}}>
+                  ~Normal (CLT)
+                </div>
+              )}
+              <div style={{position:"absolute",bottom:4,left:12,right:12,display:"flex",justifyContent:"space-between",fontSize:9,color:"#94a3b8"}}>
+                {hist.length>0&&[0,Math.floor(hist.length/2),hist.length-1].map(i=>(
+                  <span key={i}>{hist[i]?.lo.toFixed(2)}</span>
+                ))}
+              </div>
+            </div>
+
+            <Note color="#f0fdf4" border="#86efac" text="#065f46">
+              💡 <strong>What you're seeing:</strong> Each bar represents how often a particular sample {statType==="mean"?"mean":"proportion"} occurred.
+              {numSamples>=30
+                ? ` With ${numSamples} samples, the histogram is starting to look bell-shaped — this is the CLT in action! The SD of the sampling distribution (${sampSD.toFixed(3)}) should converge toward the theoretical SE (${theoreticalSE.toFixed(3)}).`
+                : ` Add more samples — the histogram will converge toward a normal (bell) shape as you add more, regardless of the population shape above.`}
+            </Note>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TAB 10: CONFIDENCE INTERVAL COVERAGE
+// ═══════════════════════════════════════════════════════════════════════════════
+function CICoverageTab() {
+  const [sampleSize, setSampleSize]   = useState(30);
+  const [numSamples, setNumSamples]   = useState(50);
+  const [confLevel, setConfLevel]     = useState(0.95);
+  const [popMean]                     = useState(50);
+  const [popSD]                       = useState(10);
+  const [intervals, setIntervals]     = useState([]);
+  const [running, setRunning]         = useState(false);
+  const intervalRef                   = useRef(null);
+
+  const simulate = () => {
+    const n=Number(sampleSize), k=Number(numSamples), conf=Number(confLevel);
+    const alpha=1-conf;
+    const zStar = Math.abs(normalInv(alpha/2));
+    const result=[];
+    for(let i=0;i<k;i++){
+      // Draw sample from Normal(popMean, popSD) via Box-Muller
+      let xbar=0;
+      for(let j=0;j<n;j++){
+        const u1=Math.random(),u2=Math.random();
+        xbar+=popMean+popSD*Math.sqrt(-2*Math.log(u1))*Math.cos(2*Math.PI*u2);
+      }
+      xbar/=n;
+      const se=popSD/Math.sqrt(n);
+      const E=zStar*se;
+      const lo=xbar-E, hi=xbar+E;
+      result.push({xbar, lo, hi, covers: lo<=popMean && popMean<=hi});
+    }
+    setIntervals(result);
+  };
+
+  const streamSimulate = () => {
+    setIntervals([]);
+    setRunning(true);
+    const n=Number(sampleSize), conf=Number(confLevel);
+    const alpha=1-conf, zStar=Math.abs(normalInv(alpha/2));
+    const se=popSD/Math.sqrt(n), E=zStar*se;
+    let count=0;
+    const total=Number(numSamples);
+    intervalRef.current=setInterval(()=>{
+      if(count>=total){ setRunning(false); clearInterval(intervalRef.current); return; }
+      let xbar=0;
+      for(let j=0;j<n;j++){
+        const u1=Math.random(),u2=Math.random();
+        xbar+=popMean+popSD*Math.sqrt(-2*Math.log(u1))*Math.cos(2*Math.PI*u2);
+      }
+      xbar/=n;
+      const lo=xbar-E, hi=xbar+E;
+      setIntervals(prev=>[...prev,{xbar,lo,hi,covers:lo<=popMean&&popMean<=hi}]);
+      count++;
+    },60);
+  };
+
+  const reset=()=>{ setRunning(false); clearInterval(intervalRef.current); setIntervals([]); };
+
+  const covering   = intervals.filter(ci=>ci.covers).length;
+  const missing    = intervals.length-covering;
+  const coveragePct= intervals.length ? (covering/intervals.length*100).toFixed(1) : "--";
+
+  // Build SVG visualization
+  const VIS_W=520, VIS_H=Math.max(300, intervals.length*10+40);
+  const allLo=intervals.map(ci=>ci.lo), allHi=intervals.map(ci=>ci.hi);
+  const globalMin=allLo.length?Math.min(...allLo,popMean-15):popMean-20;
+  const globalMax=allHi.length?Math.max(...allHi,popMean+15):popMean+20;
+  const padL=20, padR=20;
+  const usableW=VIS_W-padL-padR;
+  const sx=v=>padL+(v-globalMin)/(globalMax-globalMin)*usableW;
+  const rowH=10, rowPad=2;
+
+  return (
+    <div>
+      <Card title="🎯 Confidence Interval Coverage Simulation" accent="#1e3a8a">
+        <p style={{fontSize:13,color:"#475569",margin:"0 0 6px",lineHeight:1.6}}>
+          A <strong>{Math.round(Number(confLevel)*100)}% confidence interval</strong> means: if we repeated this sampling process many times, about <strong>{Math.round(Number(confLevel)*100)}%</strong> of the intervals we construct would contain the true population mean.
+          This simulation draws repeated samples from a known population (μ = {popMean}, σ = {popSD}) and shows which intervals capture the true mean (green) and which miss it (red).
+        </p>
+      </Card>
+
+      {/* Controls */}
+      <Card title="⚙️ Simulation Controls" accent="#7c3aed">
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:12}}>
+          <NumInput label="Sample Size (n)" value={sampleSize} onChange={v=>{setSampleSize(v);reset();}} min={2} max={500} width="100%"/>
+          <NumInput label="Number of Samples" value={numSamples} onChange={v=>{setNumSamples(v);reset();}} min={5} max={200} width="100%"/>
+          <div>
+            <label style={{display:"block",fontSize:12,fontWeight:600,color:"#475569",marginBottom:3}}>Confidence Level</label>
+            <select value={confLevel} onChange={e=>{setConfLevel(e.target.value);reset();}}
+              style={{width:"100%",padding:"8px 11px",border:"1px solid #cbd5e1",borderRadius:7,fontSize:13,outline:"none"}}>
+              {[[0.90,"90%"],[0.95,"95%"],[0.99,"99%"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{background:"#f0f4ff",borderRadius:8,padding:"10px 14px",fontSize:12,color:"#1e3a8a",marginBottom:12}}>
+          Population: Normal(μ = {popMean}, σ = {popSD}) &nbsp;|&nbsp; z* = {Math.abs(normalInv((1-Number(confLevel))/2)).toFixed(3)} &nbsp;|&nbsp; Expected Margin of Error: ±{(Math.abs(normalInv((1-Number(confLevel))/2))*popSD/Math.sqrt(Number(sampleSize))).toFixed(3)}
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button onClick={simulate} style={{background:"#7c3aed",color:"#fff",border:"none",borderRadius:8,padding:"10px 22px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+            ⚡ Generate All at Once
+          </button>
+          <button onClick={running?()=>{setRunning(false);clearInterval(intervalRef.current);}:streamSimulate}
+            style={{background:running?"#dc2626":"#059669",color:"#fff",border:"none",borderRadius:8,padding:"10px 22px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+            {running?"⏹ Stop":"▶ Stream One by One"}
+          </button>
+          <button onClick={reset} style={{background:"#f1f5f9",color:"#475569",border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 22px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+            ↺ Reset
+          </button>
+        </div>
+      </Card>
+
+      {/* Results summary */}
+      {intervals.length>0&&(
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:16}}>
+          {[
+            ["Intervals Built",intervals.length,"#1e3a8a"],
+            ["✅ Cover μ",covering,"#059669"],
+            ["❌ Miss μ",missing,"#dc2626"],
+            ["Actual Coverage",coveragePct+"%", Math.abs(parseFloat(coveragePct)-Number(confLevel)*100)<5?"#059669":"#d97706"],
+          ].map(([l,v,c])=>(
+            <div key={l} style={{background:"#f8fafc",borderRadius:10,padding:"14px 10px",textAlign:"center",border:`2px solid ${c}30`}}>
+              <div style={{fontSize:22,fontWeight:800,color:c}}>{v}</div>
+              <div style={{fontSize:11,color:"#64748b",marginTop:3,lineHeight:1.3}}>{l}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Visual */}
+      {intervals.length>0&&(
+        <Card title={`Confidence Intervals — each row is one sample (${intervals.length} total)`} accent="#059669">
+          <div style={{overflowY:"auto",maxHeight:560,overflowX:"auto"}}>
+            <svg width={VIS_W} height={VIS_H} style={{display:"block",minWidth:300}}>
+              {/* Background grid */}
+              {[0.25,0.5,0.75].map(f=>(
+                <line key={f} x1={padL+f*usableW} y1={0} x2={padL+f*usableW} y2={VIS_H} stroke="#f1f5f9" strokeWidth={1}/>
+              ))}
+
+              {/* True mean line */}
+              <line x1={sx(popMean)} y1={0} x2={sx(popMean)} y2={VIS_H} stroke="#1e3a8a" strokeWidth={2} strokeDasharray="6,4"/>
+              <text x={sx(popMean)+4} y={14} fontSize={10} fill="#1e3a8a" fontWeight="700">μ={popMean}</text>
+
+              {/* Intervals */}
+              {intervals.map((ci,i)=>{
+                const y=i*(rowH+rowPad)+24;
+                const x1=sx(ci.lo), x2=sx(ci.hi), xm=sx(ci.xbar);
+                const color=ci.covers?"#059669":"#dc2626";
+                const barColor=ci.covers?"#bbf7d0":"#fee2e2";
+                return (
+                  <g key={i}>
+                    {/* CI bar */}
+                    <rect x={Math.min(x1,x2)} y={y+1} width={Math.abs(x2-x1)} height={rowH-2} fill={barColor} rx={2}/>
+                    {/* Whisker lines */}
+                    <line x1={x1} y1={y+2} x2={x1} y2={y+rowH-2} stroke={color} strokeWidth={1.5}/>
+                    <line x1={x2} y1={y+2} x2={x2} y2={y+rowH-2} stroke={color} strokeWidth={1.5}/>
+                    <line x1={x1} y1={y+rowH/2} x2={x2} y2={y+rowH/2} stroke={color} strokeWidth={1}/>
+                    {/* Sample mean dot */}
+                    <circle cx={xm} cy={y+rowH/2} r={2.5} fill={color}/>
+                    {/* Miss indicator */}
+                    {!ci.covers&&<text x={VIS_W-padR+2} y={y+rowH/2+3} fontSize={7} fill="#dc2626" fontWeight="700">✕</text>}
+                  </g>
+                );
+              })}
+
+              {/* X-axis */}
+              <line x1={padL} y1={VIS_H-6} x2={VIS_W-padR} y2={VIS_H-6} stroke="#cbd5e1" strokeWidth={1}/>
+              {[0,0.25,0.5,0.75,1].map(f=>{
+                const v=globalMin+f*(globalMax-globalMin);
+                return <text key={f} x={padL+f*usableW} y={VIS_H-0} fontSize={8} fill="#94a3b8" textAnchor="middle">{v.toFixed(1)}</text>;
+              })}
+            </svg>
+          </div>
+
+          {/* Legend */}
+          <div style={{display:"flex",gap:20,marginTop:12,fontSize:12,flexWrap:"wrap"}}>
+            <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:24,height:10,background:"#bbf7d0",border:"1px solid #059669",borderRadius:2}}/><span style={{color:"#059669",fontWeight:600}}>Contains μ ({covering})</span></div>
+            <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:24,height:10,background:"#fee2e2",border:"1px solid #dc2626",borderRadius:2}}/><span style={{color:"#dc2626",fontWeight:600}}>Misses μ ({missing}) ✕</span></div>
+            <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:2,height:14,background:"#1e3a8a",borderRadius:1}}/><span style={{color:"#1e3a8a",fontWeight:600}}>True μ = {popMean}</span></div>
+          </div>
+
+          <Note color="#eff6ff" border="#bfdbfe" text="#1e40af">
+            💡 <strong>Interpretation:</strong> You built {intervals.length} confidence intervals. {covering} of them ({coveragePct}%) contain the true mean μ = {popMean}.
+            The theoretical coverage is {Math.round(Number(confLevel)*100)}%. {Math.abs(parseFloat(coveragePct)-Number(confLevel)*100)<8
+              ? "Your simulation is close to the theoretical value — great!"
+              : "With more samples, the coverage rate will converge toward the theoretical percentage."
+            } Notice that the <strong style={{color:"#dc2626"}}>red intervals</strong> that miss μ are not "wrong" calculations — they're just the {Math.round((1-Number(confLevel))*100)}% of intervals we expect to miss by chance.
+          </Note>
+        </Card>
+      )}
+
+      {intervals.length===0&&(
+        <Card title="How to Read This Simulation" accent="#64748b">
+          <div style={{fontSize:13,color:"#475569",lineHeight:1.8}}>
+            <div style={{marginBottom:8}}>After running the simulation, you will see one horizontal bar per sample:</div>
+            <div style={{display:"flex",gap:12,marginBottom:8,flexWrap:"wrap"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,background:"#f0fdf4",borderRadius:7,padding:"8px 14px"}}>
+                <div style={{width:40,height:12,background:"#bbf7d0",border:"1.5px solid #059669",borderRadius:2}}/>
+                <span><strong style={{color:"#059669"}}>Green bar</strong> — this interval contains the true mean μ</span>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:8,background:"#fef2f2",borderRadius:7,padding:"8px 14px"}}>
+                <div style={{width:40,height:12,background:"#fee2e2",border:"1.5px solid #dc2626",borderRadius:2}}/>
+                <span><strong style={{color:"#dc2626"}}>Red bar ✕</strong> — this interval missed the true mean μ</span>
+              </div>
+            </div>
+            <div>The vertical dashed blue line is the true population mean (μ = {popMean}). An interval "covers" μ when the bar crosses the blue line.</div>
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
